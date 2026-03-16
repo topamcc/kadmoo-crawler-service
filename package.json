@@ -1,0 +1,40 @@
+{
+  "name": "kadmoo-crawler-service",
+  "version": "1.0.0",
+  "description": "External production crawler service for Kadmoo SEO platform",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "lint": "eslint src/",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "fastify": "^5.0.0",
+    "@fastify/cors": "^10.0.0",
+    "@fastify/helmet": "^12.0.0",
+    "@fastify/rate-limit": "^10.0.0",
+    "bullmq": "^5.0.0",
+    "ioredis": "^5.0.0",
+    "crawlee": "^3.0.0",
+    "cheerio": "^1.0.0",
+    "playwright": "^1.40.0",
+    "zod": "^3.23.0",
+    "nanoid": "^5.0.0",
+    "@aws-sdk/client-s3": "^3.500.0",
+    "dotenv": "^16.4.0",
+    "pino": "^9.0.0",
+    "pino-pretty": "^11.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0",
+    "@types/node": "^22.0.0",
+    "tsx": "^4.0.0"
+  }
+}
