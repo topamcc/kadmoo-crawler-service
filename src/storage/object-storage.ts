@@ -1,0 +1,61 @@
+import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
+import { gzipSync } from "node:zlib";
+import { config } from "../config/index.js";
+import { logger } from "../logger/index.js";
+
+class ObjectStorage {
+  private client: S3Client | null = null;
+
+  private getClient(): S3Client {
+    if (!this.client) {
+      this.client = new S3Client({
+        endpoint: config.s3.endpoint,
+        region: config.s3.region,
+        credentials: {
+          accessKeyId: config.s3.accessKeyId,
+          secretAccessKey: config.s3.secretAccessKey,
+        },
+        forcePathStyle: true,
+      });
+    }
+    return this.client;
+  }
+
+  isEnabled(): boolean {
+    return config.s3.enabled;
+  }
+
+  async uploadJson(key: string, data: unknown): Promise<string> {
+    const json = JSON.stringify(data);
+    const compressed = gzipSync(Buffer.from(json, "utf-8"));
+
+    await this.getClient().send(
+      new PutObjectCommand({
+        Bucket: config.s3.bucket,
+        Key: key,
+        Body: compressed,
+        ContentType: "application/json",
+        ContentEncoding: "gzip",
+      }),
+    );
+
+    logger.debug({ key, sizeBytes: compressed.length }, "Uploaded to S3");
+    return key;
+  }
+
+  async downloadJson<T = unknown>(key: string): Promise<T> {
+    const result = await this.getClient().send(
+      new GetObjectCommand({
+        Bucket: config.s3.bucket,
+        Key: key,
+      }),
+    );
+
+    const body = await result.Body?.transformToString("utf-8");
+    if (!body) throw new Error(`Empty response for key: ${key}`);
+
+    return JSON.parse(body) as T;
+  }
+}
+
+export const objectStorage = new ObjectStorage();
