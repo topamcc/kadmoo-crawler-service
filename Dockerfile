@@ -1,6 +1,6 @@
 FROM node:20-slim AS base
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates curl && rm -rf /var/lib/apt/lists/*
+    ca-certificates curl procps && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 
 FROM base AS deps
