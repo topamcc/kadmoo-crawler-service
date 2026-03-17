@@ -10,6 +10,7 @@ export function extractPageData(
   responseTimeMs: number,
   crawlDepth: number,
   usedPlaywright: boolean,
+  includeSubdomains = false,
 ): CrawledPageData {
   const $ = cheerio.load(html);
   const baseUrl = finalUrl || requestUrl;
@@ -70,7 +71,7 @@ export function extractPageData(
       nofollow: rel.includes("nofollow"),
     };
 
-    if (isSameDomain(resolved, baseUrl)) {
+    if (isSameDomain(resolved, baseUrl, includeSubdomains)) {
       internalLinks.push(link);
     } else {
       externalLinks.push(link);

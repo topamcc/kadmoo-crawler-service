@@ -67,6 +67,7 @@ export async function executeCrawl(
       responseTimeMs,
       depth,
       request.userData?.usedPlaywright ?? false,
+      jobConfig.includeSubdomains,
     );
     pages.push(pageData);
 
@@ -76,7 +77,7 @@ export async function executeCrawl(
         const normalized = normalizeUrl(link.url);
         if (!normalized) continue;
         if (enqueuedUrls.has(normalized)) continue;
-        if (!isSameDomain(normalized, baseUrl)) continue;
+        if (!isSameDomain(normalized, baseUrl, jobConfig.includeSubdomains)) continue;
         if (jobConfig.respectRobotsTxt && !isUrlAllowed(normalized, disallowedPaths)) continue;
         if (enqueuedUrls.size >= jobConfig.maxPages) break;
 

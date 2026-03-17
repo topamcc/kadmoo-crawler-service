@@ -61,6 +61,7 @@ export async function crawlRoutes(app: FastifyInstance) {
       timeoutMs: input.timeoutMs ?? config.crawl.defaultTimeoutMs,
       respectRobotsTxt: input.respectRobotsTxt ?? true,
       forcePlaywright: input.forcePlaywright ?? false,
+      includeSubdomains: input.includeSubdomains ?? true,
       webhookUrl: input.webhookUrl,
       idempotencyKey: input.idempotencyKey,
     };

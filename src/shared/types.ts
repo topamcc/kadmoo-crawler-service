@@ -25,6 +25,7 @@ export interface CrawlJobConfig {
   timeoutMs: number;
   respectRobotsTxt: boolean;
   forcePlaywright: boolean;
+  includeSubdomains: boolean;
   webhookUrl?: string;
   idempotencyKey?: string;
 }
@@ -48,6 +49,7 @@ export interface CreateCrawlJobRequest {
   timeoutMs?: number;
   respectRobotsTxt?: boolean;
   forcePlaywright?: boolean;
+  includeSubdomains?: boolean;
   webhookUrl?: string;
   idempotencyKey?: string;
 }

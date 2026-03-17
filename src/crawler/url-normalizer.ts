@@ -36,13 +36,19 @@ export function normalizeUrl(raw: string, base?: string): string | null {
   }
 }
 
-export function isSameDomain(url: string, baseUrl: string): boolean {
+export function isSameDomain(
+  url: string,
+  baseUrl: string,
+  includeSubdomains = false,
+): boolean {
   try {
     const a = new URL(url);
     const b = new URL(baseUrl);
     const domA = a.hostname.replace(/^www\./, "");
     const domB = b.hostname.replace(/^www\./, "");
-    return domA === domB;
+    if (domA === domB) return true;
+    if (!includeSubdomains) return false;
+    return domA.endsWith(`.${domB}`) || domB.endsWith(`.${domA}`);
   } catch {
     return false;
   }
