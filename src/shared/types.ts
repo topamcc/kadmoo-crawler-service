@@ -37,6 +37,8 @@ export interface CrawlJobProgress {
   currentUrl?: string;
   elapsedMs: number;
   estimatedRemainingMs?: number;
+  resumed?: boolean;
+  reusedPages?: number;
 }
 
 export interface CreateCrawlJobRequest {
@@ -70,6 +72,8 @@ export interface CrawlJobStatusResponse {
   completedAt?: string;
   error?: string;
   usedPlaywrightFallback?: boolean;
+  resumed?: boolean;
+  reusedPages?: number;
 }
 
 export interface CrawlJobResultsResponse {
@@ -78,6 +82,8 @@ export interface CrawlJobResultsResponse {
   summary: CrawlResultSummary;
   pages: CrawledPageData[];
   artifactUrl?: string;
+  resumed?: boolean;
+  reusedPages?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -157,6 +163,9 @@ export interface HealthResponse {
     failed: number;
   };
   redis: boolean;
+  active_jobs?: number;
+  stale_checkpoints?: number;
+  resume_hit_rate_24h?: number;
 }
 
 // ---------------------------------------------------------------------------

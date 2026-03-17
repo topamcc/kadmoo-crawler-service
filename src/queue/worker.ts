@@ -75,27 +75,11 @@ async function processCrawlJob(job: Job<CrawlJobData>): Promise<CrawlJobResultsR
       summary: result.summary,
       pages: result.pages,
       artifactUrl: result.artifactUrl,
+      ...(result.resumed && { resumed: true, reusedPages: result.reusedPages }),
     };
 
-    // Notify webhook: completed
-    if (jobConfig.webhookUrl) {
-      await webhookDispatcher.send(jobConfig.webhookUrl, {
-        event: "crawl.completed",
-        jobId,
-        timestamp: new Date().toISOString(),
-        data: makeStatusPayload({
-          status: "completed",
-          completedAt: new Date().toISOString(),
-          progress: {
-            pagesQueued: 0,
-            pagesCrawled: result.summary.totalPages,
-            pagesFailed: result.summary.failedPages,
-            elapsedMs: result.summary.crawlDurationMs,
-          },
-          usedPlaywrightFallback: result.usedPlaywrightFallback,
-        }),
-      });
-    }
+    // crawl.completed webhook is sent from worker.on("completed") so it fires
+    // only after BullMQ has stored returnvalue and /crawl/:id/results is available.
 
     log.info(
       { pages: result.summary.totalPages, durationMs: result.summary.crawlDurationMs },
@@ -138,11 +122,39 @@ export async function startWorker(): Promise<Worker> {
     concurrency: config.budget.maxConcurrentJobs,
   });
 
-  workerInstance.on("completed", (job) => {
+  workerInstance.on("completed", async (job, result: CrawlJobResultsResponse) => {
     logger.info({ jobId: job.id }, "Job completed");
     quotaManager.recordJobEnd().catch((e) =>
       logger.warn({ err: e }, "Failed to decrement active_jobs on complete"),
     );
+
+    // Emit crawl.completed only after BullMQ has stored returnvalue, so
+    // GET /crawl/:id/results is available when the app receives the webhook.
+    const jobConfig = job.data.config;
+    if (jobConfig?.webhookUrl && result) {
+      const payload: CrawlJobStatusResponse = {
+        jobId: result.jobId,
+        status: "completed",
+        progress: {
+          pagesQueued: 0,
+          pagesCrawled: result.summary.totalPages,
+          pagesFailed: result.summary.failedPages,
+          elapsedMs: result.summary.crawlDurationMs,
+        },
+        config: jobConfig,
+        createdAt: new Date(job.timestamp).toISOString(),
+        startedAt: new Date(job.timestamp).toISOString(),
+        completedAt: new Date().toISOString(),
+        usedPlaywrightFallback: job.data.usedPlaywrightFallback,
+        ...(result.resumed && { resumed: true, reusedPages: result.reusedPages }),
+      };
+      await webhookDispatcher.send(jobConfig.webhookUrl, {
+        event: "crawl.completed",
+        jobId: result.jobId,
+        timestamp: new Date().toISOString(),
+        data: payload,
+      }).catch((err) => logger.warn({ err, jobId: job.id }, "crawl.completed webhook failed"));
+    }
   });
 
   workerInstance.on("failed", (job, err) => {

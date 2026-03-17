@@ -4,6 +4,7 @@ import { logger } from "../logger/index.js";
 import { extractPageData } from "./page-extractor.js";
 import { normalizeUrl, isSameDomain, ensureAbsoluteUrl } from "./url-normalizer.js";
 import { fetchRobotsRules, isUrlAllowed } from "./robots-parser.js";
+import { loadCheckpoint, saveCheckpoint } from "../storage/checkpoint.js";
 import type { CrawlJobConfig, CrawledPageData, CrawlJobProgress, CrawlResultSummary } from "../shared/types.js";
 
 export interface CrawlExecutionResult {
@@ -11,12 +12,16 @@ export interface CrawlExecutionResult {
   summary: CrawlResultSummary;
   usedPlaywrightFallback: boolean;
   artifactUrl?: string;
+  resumed?: boolean;
+  reusedPages?: number;
 }
 
 interface PageMeta {
   depth: number;
   startTime: number;
 }
+
+const CHECKPOINT_SAVE_INTERVAL = 20;
 
 export async function executeCrawl(
   jobConfig: CrawlJobConfig,
@@ -31,6 +36,35 @@ export async function executeCrawl(
   let usedPlaywrightFallback = false;
   const depthMap = new Map<string, number>();
   const statusCodes: Record<number, number> = {};
+  let resumed = false;
+  let reusedPages = 0;
+
+  const normalizedBase = normalizeUrl(baseUrl) ?? baseUrl;
+  const log = logger.child({ url: baseUrl });
+
+  let checkpoint: Awaited<ReturnType<typeof loadCheckpoint>> = null;
+  if (config.resume.enabled) {
+    checkpoint = await loadCheckpoint(jobConfig.siteId, normalizedBase, jobConfig);
+  }
+
+  if (checkpoint) {
+    resumed = true;
+    reusedPages = checkpoint.pages_crawled_count;
+    for (const u of checkpoint.queue_urls) enqueuedUrls.add(u);
+    for (const u of checkpoint.visited_urls) enqueuedUrls.add(u); // avoid re-enqueueing
+    for (const [u, d] of Object.entries(checkpoint.depth_map)) depthMap.set(u, d);
+    for (const u of checkpoint.failed_urls) failedUrls.add(u);
+    log.info(
+      { resume_reason: "checkpoint_valid", reusedPages, queueSize: checkpoint.queue_urls.length },
+      "Resumed from checkpoint",
+    );
+  } else {
+    enqueuedUrls.add(normalizedBase);
+    depthMap.set(normalizedBase, 0);
+    if (config.resume.enabled) {
+      log.info({ fresh_reason: "no_checkpoint_or_expired_or_config_mismatch" }, "Fresh crawl");
+    }
+  }
 
   // Robots.txt
   let disallowedPaths: string[] = [];
@@ -39,15 +73,16 @@ export async function executeCrawl(
     disallowedPaths = rules.disallowed;
   }
 
-  const normalizedBase = normalizeUrl(baseUrl) ?? baseUrl;
-  enqueuedUrls.add(normalizedBase);
-  depthMap.set(normalizedBase, 0);
-
-  const log = logger.child({ url: baseUrl });
-
   // Cheerio-based crawling
   const requestQueue = await RequestQueue.open(`crawl-${Date.now()}` as any);
-  await requestQueue.addRequest({ url: normalizedBase, userData: { depth: 0 } });
+  if (!resumed) {
+    await requestQueue.addRequest({ url: normalizedBase, userData: { depth: 0 } });
+  } else {
+    for (const url of checkpoint!.queue_urls) {
+      const depth = depthMap.get(url) ?? 0;
+      await requestQueue.addRequest({ url, userData: { depth, startTime: Date.now() } });
+    }
+  }
 
   const handlePage = async (ctx: any) => {
     const { request, body } = ctx;
@@ -92,14 +127,28 @@ export async function executeCrawl(
 
     onProgress({
       pagesQueued: enqueuedUrls.size,
-      pagesCrawled: pages.length,
+      pagesCrawled: pages.length + reusedPages,
       pagesFailed: failedUrls.size,
       currentUrl: request.url,
       elapsedMs: Date.now() - crawlStartTime,
       estimatedRemainingMs: pages.length > 0
         ? Math.round(((Date.now() - crawlStartTime) / pages.length) * (enqueuedUrls.size - pages.length))
         : undefined,
+      ...(resumed && { resumed: true, reusedPages }),
     });
+
+    // Periodic checkpoint save (resume support)
+    if (config.resume.enabled && pages.length > 0 && pages.length % CHECKPOINT_SAVE_INTERVAL === 0) {
+      const visitedSet = new Set(pages.map((p) => p.url));
+      const queueUrls = new Set([...enqueuedUrls].filter((u) => !visitedSet.has(u)));
+      saveCheckpoint(jobConfig.siteId, normalizedBase, jobConfig, {
+        queueUrls,
+        visitedUrls: pages.map((p) => p.url),
+        failedUrls,
+        depthMap,
+        pagesCrawledCount: pages.length + reusedPages,
+      }).catch((err) => log.warn({ err }, "Checkpoint save failed"));
+    }
   };
 
   const handleFailed = async (ctx: any, error?: Error) => {
@@ -155,7 +204,7 @@ export async function executeCrawl(
 
       const pwCrawler = new PlaywrightCrawler({
         requestQueue: pwQueue,
-        maxConcurrency: Math.min(jobConfig.concurrency, 3),
+        maxConcurrency: Math.min(jobConfig.concurrency, config.crawl.playwrightMaxConcurrency),
         maxRequestsPerCrawl: jobConfig.forcePlaywright ? jobConfig.maxPages : failedUrls.size,
         requestHandlerTimeoutSecs: Math.ceil(jobConfig.timeoutMs / 1000) * 2,
         maxRequestRetries: 1,
@@ -217,5 +266,10 @@ export async function executeCrawl(
       : 0,
   };
 
-  return { pages, summary, usedPlaywrightFallback };
+  return {
+    pages,
+    summary,
+    usedPlaywrightFallback,
+    ...(resumed && { resumed: true, reusedPages }),
+  };
 }

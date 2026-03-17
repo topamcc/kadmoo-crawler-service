@@ -46,9 +46,10 @@ export const config = {
   crawl: {
     defaultMaxPages: envInt("DEFAULT_MAX_PAGES", 200),
     defaultMaxDepth: envInt("DEFAULT_MAX_DEPTH", 10),
-    defaultConcurrency: envInt("DEFAULT_CONCURRENCY", 8),
-    defaultTimeoutMs: envInt("DEFAULT_TIMEOUT_MS", 15000),
+    defaultConcurrency: envInt("DEFAULT_CONCURRENCY", 12),
+    defaultTimeoutMs: envInt("DEFAULT_TIMEOUT_MS", 20000),
     defaultMaxDurationMinutes: envInt("DEFAULT_MAX_DURATION_MINUTES", 30),
+    playwrightMaxConcurrency: envInt("PLAYWRIGHT_MAX_CONCURRENCY", 4),
   },
 
   budget: {
@@ -57,4 +58,9 @@ export const config = {
   },
 
   playwrightEnabled: envBool("PLAYWRIGHT_ENABLED", true),
+
+  resume: {
+    enabled: envBool("CRAWL_RESUME_ENABLED", false),
+    checkpointTtlHours: envInt("CRAWL_CHECKPOINT_TTL_HOURS", 24),
+  },
 } as const;
