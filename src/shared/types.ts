@@ -108,6 +108,8 @@ export interface CrawledPageData {
   contentLength: number;
   usedPlaywright: boolean;
   error?: string;
+  /** Per-page image URLs extracted from img[src]. */
+  images?: { src: string }[];
 }
 
 export interface LinkData {

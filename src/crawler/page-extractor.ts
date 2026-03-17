@@ -78,6 +78,23 @@ export function extractPageData(
     }
   });
 
+  // Extract image URLs from img[src]
+  const images: { src: string }[] = [];
+  const seenImageUrls = new Set<string>();
+  $("img[src]").each((_, el) => {
+    const src = $(el).attr("src")?.trim();
+    if (!src || src.startsWith("data:") || src.startsWith("blob:")) return;
+    try {
+      const resolved = new URL(src, baseUrl).href;
+      if (!seenImageUrls.has(resolved)) {
+        seenImageUrls.add(resolved);
+        images.push({ src: resolved });
+      }
+    } catch {
+      /* skip invalid URLs */
+    }
+  });
+
   const contentType = "text/html";
   const contentLength = Buffer.byteLength(html, "utf-8");
 
@@ -100,5 +117,6 @@ export function extractPageData(
     responseTimeMs,
     contentLength,
     usedPlaywright,
+    images,
   };
 }
