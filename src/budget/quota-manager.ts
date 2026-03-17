@@ -30,8 +30,8 @@ class QuotaManager {
       return { allowed: false, reason: "Max concurrent jobs reached. Try again later." };
     }
 
-    // Per-site daily page budget
-    if (siteId) {
+    // Per-site daily page budget (disabled when maxPagesPerSiteDaily <= 0)
+    if (siteId && config.budget.maxPagesPerSiteDaily > 0) {
       const today = new Date().toISOString().slice(0, 10);
       const key = `crawler:daily_pages:${siteId}:${today}`;
       const usedRaw = await redis.get(key);
@@ -53,7 +53,7 @@ class QuotaManager {
 
     await redis.incr("crawler:active_jobs");
 
-    if (siteId) {
+    if (siteId && config.budget.maxPagesPerSiteDaily > 0) {
       const today = new Date().toISOString().slice(0, 10);
       const key = `crawler:daily_pages:${siteId}:${today}`;
       await redis.incrby(key, maxPages);

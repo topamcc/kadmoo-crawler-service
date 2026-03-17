@@ -53,7 +53,7 @@ export const config = {
 
   budget: {
     maxConcurrentJobs: envInt("MAX_CONCURRENT_JOBS", 5),
-    maxPagesPerSiteDaily: envInt("MAX_PAGES_PER_SITE_DAILY", 150000),
+    maxPagesPerSiteDaily: envInt("MAX_PAGES_PER_SITE_DAILY", 0),
   },
 
   playwrightEnabled: envBool("PLAYWRIGHT_ENABLED", true),
