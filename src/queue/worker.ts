@@ -4,6 +4,7 @@ import { config } from "../config/index.js";
 import { logger } from "../logger/index.js";
 import { crawlManager } from "../crawler/manager.js";
 import { webhookDispatcher } from "../webhook/dispatcher.js";
+import { quotaManager } from "../budget/quota-manager.js";
 import type {
   CrawlJobConfig,
   CrawlJobProgress,
@@ -135,10 +136,16 @@ export function startWorker(): Worker {
 
   workerInstance.on("completed", (job) => {
     logger.info({ jobId: job.id }, "Job completed");
+    quotaManager.recordJobEnd().catch((e) =>
+      logger.warn({ err: e }, "Failed to decrement active_jobs on complete"),
+    );
   });
 
   workerInstance.on("failed", (job, err) => {
     logger.error({ jobId: job?.id, err }, "Job failed");
+    quotaManager.recordJobEnd().catch((e) =>
+      logger.warn({ err: e }, "Failed to decrement active_jobs on failure"),
+    );
   });
 
   workerInstance.on("error", (err) => {
