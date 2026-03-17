@@ -5,7 +5,7 @@ import { logger } from "./logger/index.js";
 
 async function main() {
   const app = await startServer();
-  const worker = startWorker();
+  const worker = await startWorker();
 
   const shutdown = async (signal: string) => {
     logger.info({ signal }, "Shutting down gracefully...");

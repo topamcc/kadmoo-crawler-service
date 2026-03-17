@@ -69,6 +69,11 @@ class QuotaManager {
     }
   }
 
+  /** Reset active_jobs to 0 on worker startup to clear stale counters from previous runs. */
+  async resetActiveJobsOnStartup(): Promise<void> {
+    await this.redis().set("crawler:active_jobs", "0");
+  }
+
   async getJobByIdempotencyKey(key: string): Promise<string | null> {
     return this.redis().get(`crawler:idempotency:${key}`);
   }

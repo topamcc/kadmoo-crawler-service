@@ -126,8 +126,12 @@ async function processCrawlJob(job: Job<CrawlJobData>): Promise<CrawlJobResultsR
 
 let workerInstance: Worker | null = null;
 
-export function startWorker(): Worker {
+export async function startWorker(): Promise<Worker> {
   if (workerInstance) return workerInstance;
+
+  await quotaManager.resetActiveJobsOnStartup().catch((e) => {
+    logger.warn({ err: e }, "Failed to reset active_jobs on startup");
+  });
 
   workerInstance = new Worker<CrawlJobData>("crawl-jobs", processCrawlJob, {
     connection: { url: getRedisUrl() },
