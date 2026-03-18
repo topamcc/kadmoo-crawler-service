@@ -63,4 +63,10 @@ export const config = {
     enabled: envBool("CRAWL_RESUME_ENABLED", true),
     checkpointTtlHours: envInt("CRAWL_CHECKPOINT_TTL_HOURS", 24),
   },
+
+  // Analysis (for audit analysis on DigitalOcean)
+  supabaseUrl: process.env.SUPABASE_URL ?? "",
+  supabaseServiceKey: process.env.SUPABASE_SERVICE_ROLE_KEY ?? "",
+  geminiApiKey: process.env.GOOGLE_GEMINI_API_KEY ?? "",
+  psiApiKey: process.env.GOOGLE_PSI_API_KEY ?? process.env.GOOGLE_GEMINI_API_KEY ?? "",
 } as const;

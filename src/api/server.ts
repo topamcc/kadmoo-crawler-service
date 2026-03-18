@@ -7,6 +7,7 @@ import { logger } from "../logger/index.js";
 import { globalErrorHandler } from "./middleware/error-handler.js";
 import { healthRoutes } from "./routes/health.js";
 import { crawlRoutes } from "./routes/crawl.js";
+import { analyzeRoutes } from "./routes/analyze.js";
 
 export async function buildServer() {
   const app = Fastify({
@@ -28,6 +29,7 @@ export async function buildServer() {
 
   await app.register(healthRoutes);
   await app.register(crawlRoutes);
+  await app.register(analyzeRoutes);
 
   return app;
 }

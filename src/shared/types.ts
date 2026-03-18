@@ -141,13 +141,22 @@ export type WebhookEventType =
   | "crawl.started"
   | "crawl.progress"
   | "crawl.completed"
-  | "crawl.failed";
+  | "crawl.failed"
+  | "analyze.completed"
+  | "analyze.failed";
+
+export interface AnalyzeEventData {
+  auditId: string;
+  jobId: string;
+  status: "completed" | "failed";
+  error?: string;
+}
 
 export interface WebhookPayload {
   event: WebhookEventType;
   jobId: string;
   timestamp: string;
-  data: CrawlJobStatusResponse;
+  data: CrawlJobStatusResponse | AnalyzeEventData;
 }
 
 // ---------------------------------------------------------------------------
