@@ -115,6 +115,11 @@ export async function loadCheckpoint(
     return null;
   }
 
+  if (checkpoint.pages_crawled_count >= jobConfig.maxPages) {
+    await client.del(key);
+    return null;
+  }
+
   return checkpoint;
 }
 

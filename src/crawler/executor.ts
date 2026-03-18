@@ -186,12 +186,16 @@ export async function executeCrawl(
     log.warn({ url: ctx.request.url, error: ctx.error?.message }, "Page crawl failed");
   };
 
+  const effectiveMaxRequests = resumed
+    ? Math.max(0, jobConfig.maxPages - reusedPages)
+    : jobConfig.maxPages;
+
   // Phase 1: Cheerio crawl
-  if (!jobConfig.forcePlaywright) {
+  if (!jobConfig.forcePlaywright && effectiveMaxRequests > 0) {
     const crawler = new CheerioCrawler({
       requestQueue,
       maxConcurrency: jobConfig.concurrency,
-      maxRequestsPerCrawl: jobConfig.maxPages,
+      maxRequestsPerCrawl: effectiveMaxRequests,
       requestHandlerTimeoutSecs: Math.ceil(jobConfig.timeoutMs / 1000),
       maxRequestRetries: 2,
       additionalMimeTypes: ["application/xhtml+xml"],
@@ -235,7 +239,7 @@ export async function executeCrawl(
       const pwCrawler = new PlaywrightCrawler({
         requestQueue: pwQueue,
         maxConcurrency: Math.min(jobConfig.concurrency, config.crawl.playwrightMaxConcurrency),
-        maxRequestsPerCrawl: jobConfig.forcePlaywright ? jobConfig.maxPages : failedUrls.size,
+        maxRequestsPerCrawl: jobConfig.forcePlaywright ? effectiveMaxRequests : failedUrls.size,
         requestHandlerTimeoutSecs: Math.ceil(jobConfig.timeoutMs / 1000) * 2,
         maxRequestRetries: 1,
         launchContext: {

@@ -6,6 +6,8 @@ import { crawlManager } from "../crawler/manager.js";
 import { webhookDispatcher } from "../webhook/dispatcher.js";
 import { quotaManager } from "../budget/quota-manager.js";
 import { saveResults } from "../storage/results-store.js";
+import { deleteCheckpoint } from "../storage/checkpoint.js";
+import { ensureAbsoluteUrl, normalizeUrl } from "../crawler/url-normalizer.js";
 import type {
   CrawlJobConfig,
   CrawlJobProgress,
@@ -88,6 +90,11 @@ async function processCrawlJob(job: Job<CrawlJobData>): Promise<CrawlJobResultsR
       "Crawl job completed",
     );
 
+    const seedUrl = normalizeUrl(ensureAbsoluteUrl(jobConfig.url)) ?? ensureAbsoluteUrl(jobConfig.url);
+    await deleteCheckpoint(jobConfig.siteId, seedUrl).catch((e) =>
+      log.warn({ err: e }, "Failed to delete checkpoint"),
+    );
+
     return response;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -105,6 +112,9 @@ async function processCrawlJob(job: Job<CrawlJobData>): Promise<CrawlJobResultsR
         }),
       }).catch(() => {});
     }
+
+    const seedUrl = normalizeUrl(ensureAbsoluteUrl(jobConfig.url)) ?? ensureAbsoluteUrl(jobConfig.url);
+    await deleteCheckpoint(jobConfig.siteId, seedUrl).catch(() => {});
 
     throw error;
   }

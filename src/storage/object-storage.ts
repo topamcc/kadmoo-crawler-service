@@ -2,6 +2,7 @@ import * as stream from "node:stream";
 import { createReadStream } from "node:fs";
 import { createInterface } from "node:readline";
 import { S3Client, PutObjectCommand, GetObjectCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
+import { Upload } from "@aws-sdk/lib-storage";
 import { gzipSync, gunzipSync, createGzip, createGunzip } from "node:zlib";
 import { config } from "../config/index.js";
 import { logger } from "../logger/index.js";
@@ -77,15 +78,17 @@ class ObjectStorage {
 
     const gzipStream = combined.pipe(createGzip());
 
-    await this.getClient().send(
-      new PutObjectCommand({
+    const upload = new Upload({
+      client: this.getClient(),
+      params: {
         Bucket: config.s3.bucket,
         Key: key,
-        Body: gzipStream as any,
+        Body: gzipStream,
         ContentType: "application/json",
         ContentEncoding: "gzip",
-      }),
-    );
+      },
+    });
+    await upload.done();
 
     logger.debug({ key }, "Streamed NDJSON to S3");
     return key;
