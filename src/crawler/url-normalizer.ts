@@ -58,3 +58,28 @@ export function ensureAbsoluteUrl(raw: string): string {
   if (/^https?:\/\//i.test(raw)) return raw;
   return `https://${raw.replace(/^\/\//, "")}`;
 }
+
+/** Extensions that CheerioCrawler cannot parse (only text/html, xhtml, xml, json allowed) */
+const NON_HTML_EXTENSIONS = new Set([
+  "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx",
+  "jpg", "jpeg", "png", "gif", "webp", "svg", "ico", "bmp", "tiff",
+  "zip", "rar", "7z", "tar", "gz", "exe", "dmg", "mp3", "mp4", "avi", "mov",
+  "woff", "woff2", "ttf", "eot", "otf",
+]);
+
+/** Returns true if URL points to a non-HTML resource that CheerioCrawler will reject */
+export function isNonHtmlResource(url: string): boolean {
+  try {
+    const u = new URL(url);
+    const path = u.pathname.toLowerCase();
+    const ext = path.split(".").pop()?.split("?")[0] ?? "";
+    if (NON_HTML_EXTENSIONS.has(ext)) return true;
+    // Common upload paths that typically serve binaries
+    if (path.includes("/uploads/") || path.includes("/wp-content/uploads/")) {
+      if (/\.(pdf|doc|xls|jpg|jpeg|png|gif|webp|svg|xlsx|docx|pptx)$/i.test(path)) return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}

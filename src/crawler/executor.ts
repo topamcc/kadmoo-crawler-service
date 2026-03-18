@@ -2,7 +2,7 @@ import { CheerioCrawler, PlaywrightCrawler, RequestQueue } from "crawlee";
 import { config } from "../config/index.js";
 import { logger } from "../logger/index.js";
 import { extractPageData } from "./page-extractor.js";
-import { normalizeUrl, isSameDomain, ensureAbsoluteUrl } from "./url-normalizer.js";
+import { normalizeUrl, isSameDomain, ensureAbsoluteUrl, isNonHtmlResource } from "./url-normalizer.js";
 import { fetchRobotsRules, isUrlAllowed } from "./robots-parser.js";
 import { loadCheckpoint, saveCheckpoint } from "../storage/checkpoint.js";
 import type { CrawlJobConfig, CrawledPageData, CrawlJobProgress, CrawlResultSummary } from "../shared/types.js";
@@ -79,6 +79,7 @@ export async function executeCrawl(
     await requestQueue.addRequest({ url: normalizedBase, userData: { depth: 0 } });
   } else {
     for (const url of checkpoint!.queue_urls) {
+      if (isNonHtmlResource(url)) continue; // Skip PDFs, images, etc. when resuming
       const depth = depthMap.get(url) ?? 0;
       await requestQueue.addRequest({ url, userData: { depth, startTime: Date.now() } });
     }
@@ -112,6 +113,7 @@ export async function executeCrawl(
         const normalized = normalizeUrl(link.url);
         if (!normalized) continue;
         if (enqueuedUrls.has(normalized)) continue;
+        if (isNonHtmlResource(normalized)) continue; // CheerioCrawler only supports HTML
         if (!isSameDomain(normalized, baseUrl, jobConfig.includeSubdomains)) continue;
         if (jobConfig.respectRobotsTxt && !isUrlAllowed(normalized, disallowedPaths)) continue;
         if (enqueuedUrls.size >= jobConfig.maxPages) break;
