@@ -21,7 +21,7 @@ interface PageMeta {
   startTime: number;
 }
 
-const CHECKPOINT_SAVE_INTERVAL = 1000;
+const CHECKPOINT_SAVE_INTERVAL = 100;
 
 export async function executeCrawl(
   jobConfig: CrawlJobConfig,
