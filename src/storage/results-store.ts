@@ -11,6 +11,7 @@ import type { CrawlJobResultsResponse } from "../shared/types.js";
 
 const RESULTS_PREFIX = "crawl:results:";
 const RESULTS_TTL_SEC = 7 * 24 * 60 * 60; // 7 days
+const MAX_PAGES_FOR_PERSISTENCE = 2000;
 
 let redis: Redis | null = null;
 
@@ -30,6 +31,14 @@ function s3Key(jobId: string): string {
 }
 
 export async function saveResults(jobId: string, data: CrawlJobResultsResponse): Promise<void> {
+  if (data.pages && data.pages.length > MAX_PAGES_FOR_PERSISTENCE) {
+    logger.info(
+      { jobId, pageCount: data.pages.length },
+      "Skipping results persistence -- payload too large. Data remains in BullMQ returnvalue for 24h.",
+    );
+    return;
+  }
+
   const json = JSON.stringify(data);
 
   // Save to dedicated Redis key (survives BullMQ job eviction)

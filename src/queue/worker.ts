@@ -129,16 +129,10 @@ export async function startWorker(): Promise<Worker> {
       logger.warn({ err: e }, "Failed to decrement active_jobs on complete"),
     );
 
-    // Persist results to dedicated store (Redis key + S3) so they survive BullMQ eviction
-    if (result && job.id) {
-      await saveResults(job.id, result).catch((err) =>
-        logger.warn({ err, jobId: job.id }, "Failed to persist results to results-store"),
-      );
-    }
-
-    // Emit crawl.completed only after BullMQ has stored returnvalue, so
-    // GET /crawl/:id/results is available when the app receives the webhook.
     const jobConfig = job.data.config;
+
+    // CRITICAL: Send webhook FIRST so the app gets crawl.completed even if saveResults OOMs.
+    // The app triggers /api/audit/analyze which fetches from GET /crawl/:id/results (BullMQ).
     if (jobConfig?.webhookUrl && result) {
       const payload: CrawlJobStatusResponse = {
         jobId: result.jobId,
@@ -162,6 +156,13 @@ export async function startWorker(): Promise<Worker> {
         timestamp: new Date().toISOString(),
         data: payload,
       }).catch((err) => logger.warn({ err, jobId: job.id }, "crawl.completed webhook failed"));
+    }
+
+    // Fire-and-forget: persist to backup store (non-critical, BullMQ has data for 24h)
+    if (result && job.id) {
+      saveResults(job.id, result).catch((err) =>
+        logger.warn({ err, jobId: job.id }, "Failed to persist results to results-store"),
+      );
     }
   });
 
