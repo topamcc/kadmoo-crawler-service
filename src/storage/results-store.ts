@@ -88,6 +88,41 @@ export async function loadResults(jobId: string): Promise<CrawlJobResultsRespons
   return null;
 }
 
+/** Legacy path: crawl-results/{siteId}/{timestamp}.json.gz (old crawls before results/{jobId}.json.gz). */
+export async function loadResultsFromLegacyPath(
+  siteId: string,
+  jobId: string,
+): Promise<CrawlJobResultsResponse | null> {
+  if (!objectStorage.isEnabled()) return null;
+
+  const prefix = `crawl-results/${siteId}/`;
+  try {
+    const keys = await objectStorage.listObjects(prefix);
+    if (keys.length === 0) return null;
+
+    // Sorted ascending; take the most recent (last)
+    const latestKey = keys[keys.length - 1];
+    const raw = await objectStorage.downloadJson<{ config?: unknown; summary: CrawlJobResultsResponse["summary"]; pages: CrawlJobResultsResponse["pages"] }>(
+      latestKey,
+    );
+
+    if (!raw?.summary || !raw?.pages) return null;
+
+    const response: CrawlJobResultsResponse = {
+      jobId,
+      status: "completed",
+      summary: raw.summary,
+      pages: raw.pages,
+      artifactUrl: latestKey,
+    };
+    logger.debug({ jobId, key: latestKey }, "Results loaded from legacy S3 path");
+    return response;
+  } catch (err) {
+    logger.warn({ err, jobId, siteId }, "Failed to load results from legacy S3 path");
+    return null;
+  }
+}
+
 export async function closeResultsRedis(): Promise<void> {
   if (redis) {
     await redis.quit();

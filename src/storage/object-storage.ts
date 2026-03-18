@@ -1,4 +1,4 @@
-import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, GetObjectCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
 import { gzipSync, gunzipSync } from "node:zlib";
 import { config } from "../config/index.js";
 import { logger } from "../logger/index.js";
@@ -56,6 +56,29 @@ class ObjectStorage {
 
     const decompressed = gunzipSync(Buffer.from(bytes));
     return JSON.parse(decompressed.toString("utf-8")) as T;
+  }
+
+  /** List object keys under a prefix, sorted ascending (oldest first). */
+  async listObjects(prefix: string): Promise<string[]> {
+    const keys: string[] = [];
+    let continuationToken: string | undefined;
+
+    do {
+      const result = await this.getClient().send(
+        new ListObjectsV2Command({
+          Bucket: config.s3.bucket,
+          Prefix: prefix,
+          ContinuationToken: continuationToken,
+        }),
+      );
+
+      for (const obj of result.Contents ?? []) {
+        if (obj.Key) keys.push(obj.Key);
+      }
+      continuationToken = result.IsTruncated ? result.NextContinuationToken : undefined;
+    } while (continuationToken);
+
+    return keys.sort();
   }
 }
 

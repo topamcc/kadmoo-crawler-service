@@ -1,7 +1,7 @@
 import { Worker, type Job } from "bullmq";
 import { getRedisConnection } from "./crawl-queue.js";
 import { getCrawlQueue } from "./crawl-queue.js";
-import { loadResults } from "../storage/results-store.js";
+import { loadResults, loadResultsFromLegacyPath } from "../storage/results-store.js";
 import { webhookDispatcher } from "../webhook/dispatcher.js";
 import { getSupabaseClient } from "../supabase/client.js";
 import { runAnalysis } from "../analysis/run-analysis.js";
@@ -9,9 +9,15 @@ import { logger } from "../logger/index.js";
 import type { CrawlJobResultsResponse } from "../shared/types.js";
 import type { AnalyzeJobData } from "./analyze-queue.js";
 
-async function loadCrawlResults(externalJobId: string): Promise<CrawlJobResultsResponse | null> {
+async function loadCrawlResults(
+  externalJobId: string,
+  siteId: string,
+): Promise<CrawlJobResultsResponse | null> {
   const stored = await loadResults(externalJobId);
   if (stored) return stored;
+
+  const legacy = await loadResultsFromLegacyPath(siteId, externalJobId);
+  if (legacy) return legacy;
 
   const queue = getCrawlQueue();
   const job = await queue.getJob(externalJobId);
@@ -44,7 +50,7 @@ async function processAnalyzeJob(job: Job<AnalyzeJobData>): Promise<void> {
 
   log.info("Starting analyze job");
 
-  const results = await loadCrawlResults(externalJobId);
+  const results = await loadCrawlResults(externalJobId, siteId);
   if (!results) {
     const errMsg = "Crawl results not found (job may have been evicted or not yet completed)";
     log.error({ externalJobId }, errMsg);
