@@ -169,9 +169,6 @@ export async function executeCrawl(
       additionalMimeTypes: ["application/xhtml+xml"],
       requestHandler: handlePage,
       failedRequestHandler: handleFailed,
-      systemStatusOptions: {
-        maxUsedMemoryRatio: 0.8,
-      },
     });
 
     const timeoutPromise = new Promise<void>((resolve) => {
