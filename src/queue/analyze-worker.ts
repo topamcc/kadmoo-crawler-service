@@ -26,6 +26,18 @@ async function loadCrawlResults(externalJobId: string): Promise<CrawlJobResultsR
   return null;
 }
 
+const ANALYZE_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms / 60000}m`)), ms);
+    promise.then(
+      (v) => { clearTimeout(timer); resolve(v); },
+      (e) => { clearTimeout(timer); reject(e); },
+    );
+  });
+}
+
 async function processAnalyzeJob(job: Job<AnalyzeJobData>): Promise<void> {
   const { auditId, externalJobId, url, siteId, pagesQueued, webhookUrl } = job.data;
   const log = logger.child({ jobId: job.id, auditId, externalJobId });
@@ -55,14 +67,18 @@ async function processAnalyzeJob(job: Job<AnalyzeJobData>): Promise<void> {
   }
 
   const supabase = getSupabaseClient();
-  const { success, error } = await runAnalysis({
-    auditId,
-    url,
-    siteId,
-    results,
-    supabase,
-    pagesQueued,
-  });
+  const { success, error } = await withTimeout(
+    runAnalysis({
+      auditId,
+      url,
+      siteId,
+      results,
+      supabase,
+      pagesQueued,
+    }),
+    ANALYZE_TIMEOUT_MS,
+    `Analysis for audit ${auditId}`,
+  );
 
   if (webhookUrl) {
     await webhookDispatcher.send(webhookUrl, {
@@ -95,7 +111,7 @@ export async function startAnalyzeWorker(): Promise<Worker<AnalyzeJobData>> {
     processAnalyzeJob,
     {
       connection: { url: getRedisConnection() },
-      concurrency: 2,
+      concurrency: 1,
     },
   );
 
@@ -107,7 +123,7 @@ export async function startAnalyzeWorker(): Promise<Worker<AnalyzeJobData>> {
     logger.error({ err }, "Analyze worker error");
   });
 
-  logger.info({ concurrency: 2 }, "Analyze worker started");
+  logger.info({ concurrency: 1 }, "Analyze worker started");
   return workerInstance;
 }
 

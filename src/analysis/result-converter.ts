@@ -27,6 +27,8 @@ function escapeHtml(s: string): string {
     .replace(/"/g, "&quot;");
 }
 
+const MAX_CONTENT_FOR_HTML = 2000;
+
 function buildSyntheticHtml(page: CrawledPageData): string {
   const headParts: string[] = [];
   if (page.title) {
@@ -50,7 +52,10 @@ function buildSyntheticHtml(page: CrawledPageData): string {
   }
 
   if (page.mainContent) {
-    bodyParts.push(`<main><p>${escapeHtml(page.mainContent)}</p></main>`);
+    const truncated = page.mainContent.length > MAX_CONTENT_FOR_HTML
+      ? page.mainContent.slice(0, MAX_CONTENT_FOR_HTML)
+      : page.mainContent;
+    bodyParts.push(`<main><p>${escapeHtml(truncated)}</p></main>`);
   }
 
   const allLinks = [

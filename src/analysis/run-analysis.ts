@@ -33,9 +33,27 @@ export async function runAnalysis(
   const trimmedUrl = url.trim();
 
   try {
+    const rawPageCount = results.pages.length;
+
+    // Extract lightweight data needed for duplicate detection before freeing raw pages
+    const pagesForDup = rawPageCount >= 50
+      ? results.pages.map((p) => ({
+          url: p.finalUrl || p.url,
+          title: p.title ?? "",
+          metaDescription: p.metaDescription ?? "",
+          mainContent: (p.mainContent ?? "").slice(0, 5000),
+          crawlDepth: p.crawlDepth,
+        }))
+      : [];
+
     const crawl = convertExternalResultsToCrawlResult(results, trimmedUrl, pagesQueued);
 
-    const totalCrawled = results.summary?.totalPages ?? results.pages.length;
+    const totalCrawled = results.summary?.totalPages ?? rawPageCount;
+
+    // Free raw crawl data to reduce memory pressure on large sites
+    results.pages.length = 0;
+    (results as { pages: unknown[] }).pages = [];
+
     await supabase
       .from("site_audits")
       .update({
@@ -100,20 +118,14 @@ export async function runAnalysis(
       null,
       null,
       { images: crawl.imagesInventory ?? [], pdfs: crawl.pdfLinks ?? [] },
-      { usedFallback: false, finalDepth: results.pages.length },
+      { usedFallback: false, finalDepth: rawPageCount },
     );
 
-    if (results.pages.length >= 50) {
-      const pagesForDup = results.pages.map((p) => ({
-        url: p.finalUrl || p.url,
-        title: p.title ?? "",
-        metaDescription: p.metaDescription ?? "",
-        mainContent: p.mainContent ?? "",
-        crawlDepth: p.crawlDepth,
-      }));
+    if (pagesForDup.length >= 50) {
       const duplicateContent = detectDuplicateContent(pagesForDup);
       report = mergeDuplicateContentIntoReport(report, duplicateContent);
     }
+    pagesForDup.length = 0;
 
     const updatePayload: Record<string, unknown> = {
       status: "completed",
