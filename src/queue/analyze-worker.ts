@@ -150,6 +150,8 @@ export async function startAnalyzeWorker(): Promise<Worker<AnalyzeJobData>> {
     {
       connection: { url: getRedisConnection() },
       concurrency: 1,
+      lockDuration: 600_000,   // 10 minutes
+      lockRenewTime: 150_000,  // 2.5 minutes (renew well before expiry)
     },
   );
 

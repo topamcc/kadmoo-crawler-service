@@ -33,6 +33,17 @@ export async function runAnalysis(
   const { auditId, url, siteId, results, supabase, pagesQueued } = params;
   const trimmedUrl = url.trim();
 
+  const { data: existingAudit } = await supabase
+    .from("site_audits")
+    .select("status")
+    .eq("id", auditId)
+    .single();
+
+  if (existingAudit?.status === "completed") {
+    logger.info({ auditId }, "Audit already completed, skipping re-analysis");
+    return { success: true };
+  }
+
   try {
     const rawPageCount = results.pages.length;
 
