@@ -44,7 +44,7 @@ export const config = {
   },
 
   crawl: {
-    defaultMaxPages: envInt("DEFAULT_MAX_PAGES", 200),
+    defaultMaxPages: envInt("DEFAULT_MAX_PAGES", 10000),
     defaultMaxDepth: envInt("DEFAULT_MAX_DEPTH", 10),
     defaultConcurrency: envInt("DEFAULT_CONCURRENCY", 12),
     defaultTimeoutMs: envInt("DEFAULT_TIMEOUT_MS", 20000),

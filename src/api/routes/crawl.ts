@@ -79,7 +79,6 @@ export async function crawlRoutes(app: FastifyInstance) {
     if (input.idempotencyKey) {
       await quotaManager.registerIdempotencyKey(input.idempotencyKey, jobId);
     }
-    await quotaManager.recordJobStart(input.siteId, jobConfig.maxPages);
 
     logger.info({ jobId, url: input.url, siteId: input.siteId }, "Crawl job created");
 

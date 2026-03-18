@@ -15,6 +15,7 @@ export async function analyzeRoutes(app: FastifyInstance) {
       siteId: string;
       pagesQueued?: number;
       webhookUrl: string;
+      artifactUrl?: string;
     };
   }>("/analyze", async (request, reply) => {
     const body = request.body;
@@ -41,6 +42,7 @@ export async function analyzeRoutes(app: FastifyInstance) {
       siteId: body.siteId,
       pagesQueued: body.pagesQueued,
       webhookUrl: body.webhookUrl.replace(/\/$/, ""),
+      artifactUrl: body.artifactUrl,
     };
 
     const queue = getAnalyzeQueue();

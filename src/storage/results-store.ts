@@ -11,7 +11,7 @@ import type { CrawlJobResultsResponse } from "../shared/types.js";
 
 const RESULTS_PREFIX = "crawl:results:";
 const RESULTS_TTL_SEC = 7 * 24 * 60 * 60; // 7 days
-const MAX_PAGES_FOR_PERSISTENCE = 2000;
+const MAX_PAGES_FOR_PERSISTENCE = 50000;
 
 let redis: Redis | null = null;
 

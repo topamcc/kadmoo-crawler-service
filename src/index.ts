@@ -3,6 +3,8 @@ import { startWorker, stopWorker } from "./queue/worker.js";
 import { startAnalyzeWorker, stopAnalyzeWorker } from "./queue/analyze-worker.js";
 import { closeQueue } from "./queue/crawl-queue.js";
 import { closeAnalyzeQueue } from "./queue/analyze-queue.js";
+import { closeResultsRedis } from "./storage/results-store.js";
+import { closeCheckpointRedis } from "./storage/checkpoint.js";
 import { logger } from "./logger/index.js";
 
 async function main() {
@@ -17,6 +19,8 @@ async function main() {
     await stopAnalyzeWorker();
     await closeQueue();
     await closeAnalyzeQueue();
+    await closeResultsRedis().catch(() => {});
+    await closeCheckpointRedis().catch(() => {});
     logger.info("Shutdown complete");
     process.exit(0);
   };

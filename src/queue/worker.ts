@@ -25,6 +25,7 @@ async function processCrawlJob(job: Job<CrawlJobData>): Promise<CrawlJobResultsR
   const log = logger.child({ jobId, url: jobConfig.url });
 
   log.info("Starting crawl job");
+  await quotaManager.recordJobStart(jobConfig.siteId, jobConfig.maxPages);
   const startTime = Date.now();
 
   // Notify webhook: started
@@ -134,11 +135,11 @@ export async function startWorker(): Promise<Worker> {
     // CRITICAL: Send webhook FIRST so the app gets crawl.completed even if saveResults OOMs.
     // The app triggers /api/audit/analyze which fetches from GET /crawl/:id/results (BullMQ).
     if (jobConfig?.webhookUrl && result) {
-      const payload: CrawlJobStatusResponse = {
+      const payload = {
         jobId: result.jobId,
-        status: "completed",
+        status: "completed" as const,
         progress: {
-          pagesQueued: 0,
+          pagesQueued: result.summary.totalPages,
           pagesCrawled: result.summary.totalPages,
           pagesFailed: result.summary.failedPages,
           elapsedMs: result.summary.crawlDurationMs,
@@ -148,6 +149,7 @@ export async function startWorker(): Promise<Worker> {
         startedAt: new Date(job.timestamp).toISOString(),
         completedAt: new Date().toISOString(),
         usedPlaywrightFallback: job.data.usedPlaywrightFallback,
+        artifactUrl: result.artifactUrl ?? `results/${result.jobId}.json.gz`,
         ...(result.resumed && { resumed: true, reusedPages: result.reusedPages }),
       };
       await webhookDispatcher.send(jobConfig.webhookUrl, {

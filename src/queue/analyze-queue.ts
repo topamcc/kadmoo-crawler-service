@@ -11,6 +11,7 @@ export interface AnalyzeJobData {
   siteId: string;
   pagesQueued?: number;
   webhookUrl: string;
+  artifactUrl?: string;
 }
 
 export function getAnalyzeQueue(): Queue<AnalyzeJobData> {

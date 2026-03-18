@@ -62,11 +62,12 @@ class QuotaManager {
   }
 
   async recordJobEnd(): Promise<void> {
-    const redis = this.redis();
-    const current = await redis.get("crawler:active_jobs");
-    if (current && parseInt(current, 10) > 0) {
-      await redis.decr("crawler:active_jobs");
-    }
+    const lua = `
+      local v = tonumber(redis.call('get', KEYS[1]) or '0')
+      if v > 0 then redis.call('decr', KEYS[1]) end
+      return v
+    `;
+    await this.redis().eval(lua, 1, "crawler:active_jobs");
   }
 
   /** Reset active_jobs to 0 on worker startup to clear stale counters from previous runs. */

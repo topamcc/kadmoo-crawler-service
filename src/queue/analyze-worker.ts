@@ -2,6 +2,7 @@ import { Worker, type Job } from "bullmq";
 import { getRedisConnection } from "./crawl-queue.js";
 import { getCrawlQueue } from "./crawl-queue.js";
 import { loadResults, loadResultsFromLegacyPath } from "../storage/results-store.js";
+import { objectStorage } from "../storage/object-storage.js";
 import { webhookDispatcher } from "../webhook/dispatcher.js";
 import { getSupabaseClient } from "../supabase/client.js";
 import { runAnalysis } from "../analysis/run-analysis.js";
@@ -12,13 +13,32 @@ import type { AnalyzeJobData } from "./analyze-queue.js";
 async function loadCrawlResults(
   externalJobId: string,
   siteId: string,
+  artifactUrl?: string,
 ): Promise<CrawlJobResultsResponse | null> {
+  // Priority 1: direct S3 load via artifactUrl (most reliable)
+  if (artifactUrl && objectStorage.isEnabled()) {
+    try {
+      const data = await objectStorage.downloadJson<CrawlJobResultsResponse>(artifactUrl);
+      if (data) {
+        logger.info({ externalJobId, artifactUrl }, "Results loaded from artifactUrl");
+        if (!data.jobId) data.jobId = externalJobId;
+        if (!data.status) data.status = "completed";
+        return data;
+      }
+    } catch (err) {
+      logger.warn({ err, externalJobId, artifactUrl }, "Failed to load from artifactUrl, trying fallbacks");
+    }
+  }
+
+  // Priority 2: results-store (Redis + S3 results/{jobId}.json.gz)
   const stored = await loadResults(externalJobId);
   if (stored) return stored;
 
+  // Priority 3: legacy S3 path crawl-results/{siteId}/
   const legacy = await loadResultsFromLegacyPath(siteId, externalJobId);
   if (legacy) return legacy;
 
+  // Priority 4: BullMQ returnvalue
   const queue = getCrawlQueue();
   const job = await queue.getJob(externalJobId);
   if (job) {
@@ -45,12 +65,12 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
 }
 
 async function processAnalyzeJob(job: Job<AnalyzeJobData>): Promise<void> {
-  const { auditId, externalJobId, url, siteId, pagesQueued, webhookUrl } = job.data;
+  const { auditId, externalJobId, url, siteId, pagesQueued, webhookUrl, artifactUrl } = job.data;
   const log = logger.child({ jobId: job.id, auditId, externalJobId });
 
-  log.info("Starting analyze job");
+  log.info({ artifactUrl }, "Starting analyze job");
 
-  const results = await loadCrawlResults(externalJobId, siteId);
+  const results = await loadCrawlResults(externalJobId, siteId, artifactUrl);
   if (!results) {
     const errMsg = "Crawl results not found (job may have been evicted or not yet completed)";
     log.error({ externalJobId }, errMsg);
