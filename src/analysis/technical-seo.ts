@@ -10,11 +10,13 @@ import type {
   AuditFinding,
 } from "./types.js";
 
+const MAX_TECH_PAGES = 2500;
+
 export function analyseTechnicalSeo(crawl: CrawlResult): TechnicalSeoResult {
   const findings: AuditFinding[] = [];
   const { homepage, subPages, sitemap, robots, brokenCanonicals } = crawl;
   const h = homepage.headers;
-  const allPages = [homepage, ...subPages];
+  const allPages = [homepage, ...subPages.slice(0, MAX_TECH_PAGES - 1)];
 
   if (homepage.statusCode !== 200) {
     findings.push({

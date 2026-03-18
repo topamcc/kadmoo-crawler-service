@@ -156,13 +156,17 @@ export function analyseSchema(page: CrawledPage): SchemaResult {
   };
 }
 
+const MAX_SCHEMA_PAGES = 2500;
+const MAX_SCHEMA_BLOCKS = 500;
+
 export function analyseSchemaMulti(pages: CrawledPage[]): SchemaResult {
   const allFindings: AuditFinding[] = [];
   const allBlocks: SchemaItem[] = [];
   const typesByPage = new Map<string, Set<string>>();
   const pagesWithNoSchema: string[] = [];
 
-  for (const page of pages) {
+  const pagesToAnalyse = pages.length > MAX_SCHEMA_PAGES ? pages.slice(0, MAX_SCHEMA_PAGES) : pages;
+  for (const page of pagesToAnalyse) {
     if (!page.html || page.statusCode >= 400) continue;
     const blocks = extractJsonLdBlocks(page.html);
     const pageTypes = new Set(blocks.map((b) => b.type));
@@ -173,7 +177,9 @@ export function analyseSchemaMulti(pages: CrawledPage[]): SchemaResult {
     }
 
     for (const block of blocks) {
-      allBlocks.push(block);
+      if (allBlocks.length < MAX_SCHEMA_BLOCKS) {
+        allBlocks.push(block);
+      }
       if (!block.isValid) {
         allFindings.push({
           id: `schema-invalid-${block.type.toLowerCase()}@${page.url}`,

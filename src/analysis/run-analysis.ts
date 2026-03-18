@@ -70,13 +70,22 @@ export async function runAnalysis(
       .eq("id", auditId);
 
     const allPages = [crawl.homepage, ...crawl.subPages];
+    logger.info({ auditId, allPages: allPages.length }, "Running analysis steps...");
 
     const technicalSeo = analyseTechnicalSeo(crawl);
+    logger.info({ auditId }, "step 1/5 technicalSeo done");
+
     const onPage = analyseOnPageMulti(allPages, crawl);
+    logger.info({ auditId }, "step 2/5 onPage done");
+
     const links = analyseLinksMulti(allPages, crawl.brokenLinks);
+    logger.info({ auditId }, "step 3/5 links done");
+
     const schema = analyseSchemaMulti(allPages);
+    logger.info({ auditId }, "step 4/5 schema done");
+
     const architecture = analyseSiteArchitecture(crawl);
-    logger.info({ auditId }, "Analysis steps done, building report...");
+    logger.info({ auditId }, "step 5/5 architecture done");
 
     const [pageSpeed, geo, keywords] = await Promise.all([
       analysePageSpeed(trimmedUrl),
@@ -84,11 +93,12 @@ export async function runAnalysis(
       analyseKeywords(crawl),
     ]);
 
-    const dataSources: ("link" | "ga" | "sc")[] = ["link"];
-
+    // Free HTML from all pages now that all analysis is done
     for (const page of allPages) {
       (page as { html?: string }).html = "";
     }
+
+    const dataSources: ("link" | "ga" | "sc")[] = ["link"];
 
     await supabase
       .from("site_audits")
@@ -137,8 +147,12 @@ export async function runAnalysis(
     if (trimmedReport.crawledUrls && trimmedReport.crawledUrls.length > MAX_CRAWLED_URLS) {
       trimmedReport.crawledUrls = trimmedReport.crawledUrls.slice(0, MAX_CRAWLED_URLS);
     }
+    const MAX_FINDINGS_PER_SECTION = 200;
     for (const section of Object.values(trimmedReport.sections) as { findings?: Array<{ affectedUrls?: string[] }> }[]) {
       if (section?.findings) {
+        if (section.findings.length > MAX_FINDINGS_PER_SECTION) {
+          section.findings = section.findings.slice(0, MAX_FINDINGS_PER_SECTION);
+        }
         for (const f of section.findings) {
           if (f.affectedUrls && f.affectedUrls.length > MAX_AFFECTED_URLS) {
             f.affectedUrls = f.affectedUrls.slice(0, MAX_AFFECTED_URLS);

@@ -59,8 +59,8 @@ function buildSyntheticHtml(page: CrawledPageData): string {
   }
 
   const allLinks = [
-    ...page.internalLinks.map((l) => ({ ...l, external: false })),
-    ...page.externalLinks.map((l) => ({ ...l, external: true })),
+    ...page.internalLinks.slice(0, 300).map((l) => ({ ...l, external: false })),
+    ...page.externalLinks.slice(0, 100).map((l) => ({ ...l, external: true })),
   ];
   for (const link of allLinks) {
     const rel = link.nofollow ? ' rel="nofollow"' : "";
@@ -339,9 +339,9 @@ export function convertExternalResultsToCrawlResult(
     subPages: subPagesData.map(toCrawledPage),
     sitemap: STUB_SITEMAP,
     robots: STUB_ROBOTS,
-    brokenLinks: extractBrokenLinks(pages, targetUrl),
+    brokenLinks: extractBrokenLinks(pages, targetUrl).slice(0, 1000),
     crawlMeta: buildCrawlMeta(summary, pages, pagesQueued),
-    imagesInventory,
-    pdfLinks,
+    imagesInventory: imagesInventory.slice(0, 5000),
+    pdfLinks: pdfLinks.slice(0, 1000),
   };
 }

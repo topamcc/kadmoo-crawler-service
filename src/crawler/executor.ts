@@ -19,6 +19,8 @@ export interface CrawlExecutionResult {
   artifactUrl?: string;
   resumed?: boolean;
   reusedPages?: number;
+  /** Path to NDJSON file (for streaming upload). Caller must delete after use. */
+  ndjsonPath?: string;
 }
 
 const CHECKPOINT_SAVE_INTERVAL = 100;
@@ -298,16 +300,11 @@ export async function executeCrawl(
     if (trimmed) pages.push(JSON.parse(trimmed) as CrawledPageData);
   }
 
-  try {
-    fs.unlinkSync(ndjsonPath);
-  } catch (err: unknown) {
-    log.warn({ err, ndjsonPath }, "Failed to delete temp NDJSON file");
-  }
-
   return {
     pages,
     summary,
     usedPlaywrightFallback,
+    ndjsonPath,
     ...(resumed && { resumed: true, reusedPages }),
   };
 }

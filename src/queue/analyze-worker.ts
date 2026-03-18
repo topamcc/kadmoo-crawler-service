@@ -15,18 +15,30 @@ async function loadCrawlResults(
   siteId: string,
   artifactUrl?: string,
 ): Promise<CrawlJobResultsResponse | null> {
-  // Priority 1: direct S3 load via artifactUrl (most reliable)
+  // Priority 1: direct S3 load via artifactUrl
+  // Try legacy (downloadJson) first for existing scans; streaming (downloadNdjsonStream) for new format
   if (artifactUrl && objectStorage.isEnabled()) {
     try {
       const data = await objectStorage.downloadJson<CrawlJobResultsResponse>(artifactUrl);
-      if (data) {
-        logger.info({ externalJobId, artifactUrl }, "Results loaded from artifactUrl");
+      if (data?.summary && Array.isArray(data.pages)) {
+        logger.info({ externalJobId, artifactUrl, pages: data.pages.length }, "Results loaded from artifactUrl (legacy)");
         if (!data.jobId) data.jobId = externalJobId;
         if (!data.status) data.status = "completed";
         return data;
       }
-    } catch (err) {
-      logger.warn({ err, externalJobId, artifactUrl }, "Failed to load from artifactUrl, trying fallbacks");
+    } catch (legacyErr) {
+      try {
+        const data = await objectStorage.downloadNdjsonStream<CrawlJobResultsResponse>(artifactUrl);
+        if (data?.summary && Array.isArray(data.pages)) {
+          logger.info({ externalJobId, artifactUrl, pages: data.pages.length }, "Results loaded from artifactUrl (streaming)");
+          if (!data.jobId) data.jobId = externalJobId;
+          if (!data.status) data.status = "completed";
+          return data;
+        }
+      } catch (streamErr) {
+        logger.warn({ err: streamErr, externalJobId, artifactUrl }, "Streaming load also failed");
+      }
+      logger.warn({ err: legacyErr, externalJobId, artifactUrl }, "Failed to load from artifactUrl, trying fallbacks");
     }
   }
 
@@ -142,7 +154,11 @@ export async function startAnalyzeWorker(): Promise<Worker<AnalyzeJobData>> {
   );
 
   workerInstance.on("failed", (job, err) => {
-    logger.error({ jobId: job?.id, auditId: job?.data?.auditId, err }, "Analyze job failed");
+    const errMsg = err instanceof Error ? err.message : String(err);
+    logger.error(
+      { jobId: job?.id, auditId: job?.data?.auditId, errMsg, stack: err instanceof Error ? err.stack : undefined },
+      "Analyze job failed",
+    );
   });
 
   workerInstance.on("error", (err) => {

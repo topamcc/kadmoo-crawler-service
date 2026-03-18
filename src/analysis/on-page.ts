@@ -347,6 +347,9 @@ export function analyseOnPage(page: CrawledPage): OnPageResult {
   };
 }
 
+const MAX_ONPAGE_PAGES = 2500;
+const MAX_ONPAGE_FINDINGS = 5000;
+
 export function analyseOnPageMulti(pages: CrawledPage[], crawl?: CrawlResult): OnPageResult {
   if (pages.length === 0) {
     return analyseOnPage({
@@ -361,19 +364,23 @@ export function analyseOnPageMulti(pages: CrawledPage[], crawl?: CrawlResult): O
     });
   }
 
+  const pagesToAnalyse = pages.length > MAX_ONPAGE_PAGES ? pages.slice(0, MAX_ONPAGE_PAGES) : pages;
+
   const allFindings: AuditFinding[] = [];
   const perPage: OnPageResult[] = [];
 
-  for (const page of pages) {
+  for (const page of pagesToAnalyse) {
     if (!page.html || page.statusCode >= 400) continue;
     const result = analyseOnPage(page);
     perPage.push(result);
-    for (const f of result.findings) {
-      allFindings.push({
-        ...f,
-        id: `${f.id}@${page.url}`,
-        affectedUrls: [page.url],
-      });
+    if (allFindings.length < MAX_ONPAGE_FINDINGS) {
+      for (const f of result.findings) {
+        allFindings.push({
+          ...f,
+          id: `${f.id}@${page.url}`,
+          affectedUrls: [page.url],
+        });
+      }
     }
   }
 
@@ -383,7 +390,7 @@ export function analyseOnPageMulti(pages: CrawledPage[], crawl?: CrawlResult): O
 
   for (let i = 0; i < perPage.length; i++) {
     const d = perPage[i].data;
-    const url = pages.filter((p) => p.html && p.statusCode < 400)[i]?.url ?? "";
+    const url = pagesToAnalyse.filter((p) => p.html && p.statusCode < 400)[i]?.url ?? "";
     if (d.title.value) {
       const key = d.title.value.toLowerCase();
       titleMap.set(key, [...(titleMap.get(key) ?? []), url]);

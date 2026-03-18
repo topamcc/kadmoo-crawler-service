@@ -103,9 +103,12 @@ export async function loadResultsFromLegacyPath(
 
     // Sorted ascending; take the most recent (last)
     const latestKey = keys[keys.length - 1];
-    const raw = await objectStorage.downloadJson<{ config?: unknown; summary: CrawlJobResultsResponse["summary"]; pages: CrawlJobResultsResponse["pages"] }>(
-      latestKey,
-    );
+    let raw: { summary?: CrawlJobResultsResponse["summary"]; pages?: CrawlJobResultsResponse["pages"] };
+    try {
+      raw = await objectStorage.downloadNdjsonStream(latestKey) as typeof raw;
+    } catch {
+      raw = await objectStorage.downloadJson(latestKey) as typeof raw;
+    }
 
     if (!raw?.summary || !raw?.pages) return null;
 

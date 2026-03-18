@@ -180,6 +180,8 @@ export function analyseLinks(page: CrawledPage): LinksResult {
   };
 }
 
+const MAX_LINKS_PAGES = 2500;
+
 export function analyseLinksMulti(
   pages: CrawledPage[],
   brokenLinks: BrokenLink[],
@@ -197,6 +199,7 @@ export function analyseLinksMulti(
   let tooLongUrlCount = 0;
   const internalTargets = new Set<string>();
   const allLinks: LinkInfo[] = [];
+  const MAX_LINKS_COLLECTED = 10000;
 
   let origin = "";
   let pageIsHttps = false;
@@ -206,7 +209,8 @@ export function analyseLinksMulti(
     pageIsHttps = firstUrl.startsWith("https://");
   } catch { /* skip */ }
 
-  for (const page of pages) {
+  const pagesToAnalyse = pages.length > MAX_LINKS_PAGES ? pages.slice(0, MAX_LINKS_PAGES) : pages;
+  for (const page of pagesToAnalyse) {
     const pageHttps = page.url.startsWith("https://");
     if (!page.html) continue;
     const $ = cheerio.load(page.html);
@@ -252,13 +256,15 @@ export function analyseLinksMulti(
         tooLongUrlCount++;
       }
 
-      allLinks.push({
-        href: resolvedUrl,
-        anchorText: anchorText.slice(0, 100),
-        isInternal,
-        isNofollow,
-        isExternal,
-      });
+      if (allLinks.length < MAX_LINKS_COLLECTED) {
+        allLinks.push({
+          href: resolvedUrl,
+          anchorText: anchorText.slice(0, 100),
+          isInternal,
+          isNofollow,
+          isExternal,
+        });
+      }
     });
   }
 

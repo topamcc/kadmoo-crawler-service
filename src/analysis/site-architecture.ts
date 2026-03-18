@@ -299,9 +299,14 @@ function findOrphanPages(
     .slice(0, 100);
 }
 
+const MAX_ARCH_PAGES = 2500;
+
 export function analyseSiteArchitecture(crawl: CrawlResult): SiteArchitectureResult {
   const findings: AuditFinding[] = [];
-  const allPages = [crawl.homepage, ...crawl.subPages];
+  const limitedSubPages = crawl.subPages.length > MAX_ARCH_PAGES - 1
+    ? crawl.subPages.slice(0, MAX_ARCH_PAGES - 1)
+    : crawl.subPages;
+  const allPages = [crawl.homepage, ...limitedSubPages];
 
   const navigation = {
     items: extractNavigation(crawl.homepage.html, crawl.homepage.url),
