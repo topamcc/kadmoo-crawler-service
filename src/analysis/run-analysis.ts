@@ -16,6 +16,7 @@ import { buildReport, mergeDuplicateContentIntoReport } from "./scorer.js";
 import { detectDuplicateContent } from "./internal-duplicate-detector.js";
 import { convertExternalResultsToCrawlResult } from "./result-converter.js";
 import type { CrawlJobResultsResponse } from "../shared/types.js";
+import { logger } from "../logger/index.js";
 
 export interface RunAnalysisParams {
   auditId: string;
@@ -47,6 +48,7 @@ export async function runAnalysis(
       : [];
 
     const crawl = convertExternalResultsToCrawlResult(results, trimmedUrl, pagesQueued);
+    logger.info({ auditId, rawPageCount }, "Converted crawl results, running analysis...");
 
     const totalCrawled = results.summary?.totalPages ?? rawPageCount;
 
@@ -74,6 +76,7 @@ export async function runAnalysis(
     const links = analyseLinksMulti(allPages, crawl.brokenLinks);
     const schema = analyseSchemaMulti(allPages);
     const architecture = analyseSiteArchitecture(crawl);
+    logger.info({ auditId }, "Analysis steps done, building report...");
 
     const [pageSpeed, geo, keywords] = await Promise.all([
       analysePageSpeed(trimmedUrl),
@@ -149,6 +152,16 @@ export async function runAnalysis(
     if (trimmedReport.sections.links?.data?.brokenLinks?.length > 200) {
       trimmedReport.sections.links.data.brokenLinks = trimmedReport.sections.links.data.brokenLinks.slice(0, 200);
     }
+    // Truncate architecture.crawlDepth and domainAssets to avoid "Invalid string length"
+    const archData = trimmedReport.sections?.architecture?.data;
+    if (archData?.crawlDepth && archData.crawlDepth.length > 500) {
+      archData.crawlDepth = archData.crawlDepth.slice(0, 500);
+    }
+    const da = trimmedReport.sections?.domainAssets?.data;
+    if (da?.images && da.images.length > 1000) da.images = da.images.slice(0, 1000);
+    if (da?.pdfs && da.pdfs.length > 500) da.pdfs = da.pdfs.slice(0, 500);
+
+    logger.info({ auditId }, "Report built, truncating and updating Supabase...");
 
     const updatePayload: Record<string, unknown> = {
       status: "completed",
@@ -179,10 +192,11 @@ export async function runAnalysis(
       .update(updatePayload)
       .eq("id", auditId);
 
+    logger.info({ auditId }, "Supabase update done");
     return { success: true };
   } catch (error: unknown) {
     const message =
-      error instanceof Error ? error.message : "External analysis failed";
+      (error instanceof Error ? error.message : "External analysis failed").slice(0, 500);
     console.error("[runAnalysis] Failed:", error);
 
     await supabase
