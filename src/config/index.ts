@@ -60,7 +60,7 @@ export const config = {
   playwrightEnabled: envBool("PLAYWRIGHT_ENABLED", true),
 
   resume: {
-    enabled: envBool("CRAWL_RESUME_ENABLED", false),
+    enabled: envBool("CRAWL_RESUME_ENABLED", true),
     checkpointTtlHours: envInt("CRAWL_CHECKPOINT_TTL_HOURS", 24),
   },
 } as const;
