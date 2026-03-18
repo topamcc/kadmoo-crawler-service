@@ -53,7 +53,7 @@ export const config = {
   },
 
   budget: {
-    maxConcurrentJobs: envInt("MAX_CONCURRENT_JOBS", 5),
+    maxConcurrentJobs: envInt("MAX_CONCURRENT_JOBS", 1),
     maxPagesPerSiteDaily: envInt("MAX_PAGES_PER_SITE_DAILY", 0),
   },
 
