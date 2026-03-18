@@ -175,7 +175,48 @@ export async function runAnalysis(
     if (da?.images && da.images.length > 1000) da.images = da.images.slice(0, 1000);
     if (da?.pdfs && da.pdfs.length > 500) da.pdfs = da.pdfs.slice(0, 500);
 
+    // Aggressively strip section data to keep JSON under V8 string limit
+    for (const [key, section] of Object.entries(trimmedReport.sections) as [string, { data?: Record<string, unknown>; findings?: unknown[] }][]) {
+      if (!section) continue;
+      // Strip any huge data arrays we haven't already handled
+      if (section.data && typeof section.data === "object") {
+        for (const [dk, dv] of Object.entries(section.data)) {
+          if (Array.isArray(dv) && dv.length > 500) {
+            (section.data as Record<string, unknown>)[dk] = dv.slice(0, 500);
+          }
+        }
+      }
+    }
+
     logger.info({ auditId }, "Report built, truncating and updating Supabase...");
+
+    // Validate the report can be serialized before sending to Supabase
+    let reportJson: string;
+    try {
+      reportJson = JSON.stringify(trimmedReport);
+    } catch {
+      logger.warn({ auditId }, "Report too large for JSON.stringify, stripping findings and data");
+      // Emergency strip: remove all findings and large data from sections
+      for (const section of Object.values(trimmedReport.sections) as { findings?: unknown[]; data?: Record<string, unknown> }[]) {
+        if (!section) continue;
+        if (section.findings) section.findings = section.findings.slice(0, 20);
+        if (section.data && typeof section.data === "object") {
+          for (const [dk, dv] of Object.entries(section.data)) {
+            if (Array.isArray(dv) && dv.length > 50) {
+              (section.data as Record<string, unknown>)[dk] = dv.slice(0, 50);
+            }
+          }
+        }
+      }
+      if (trimmedReport.crawledUrls) trimmedReport.crawledUrls = trimmedReport.crawledUrls.slice(0, 500);
+      try {
+        reportJson = JSON.stringify(trimmedReport);
+      } catch {
+        logger.error({ auditId }, "Report still too large after emergency strip");
+        reportJson = "{}";
+      }
+    }
+    logger.info({ auditId, reportSizeKB: Math.round(reportJson.length / 1024) }, "Report JSON size");
 
     const updatePayload: Record<string, unknown> = {
       status: "completed",
@@ -189,7 +230,7 @@ export async function runAnalysis(
       links_score: report.sections.links.score,
       architecture_score: report.sections.architecture.score,
       keywords_score: report.sections.keywords.score,
-      report: trimmedReport,
+      report: JSON.parse(reportJson),
       issues_found: report.summary.issuesCount,
       warnings_found: report.summary.warningsCount,
       opportunities_found: report.summary.opportunitiesCount,
