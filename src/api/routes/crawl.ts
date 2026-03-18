@@ -12,6 +12,7 @@ import { config } from "../../config/index.js";
 import { apiKeyAuth } from "../middleware/auth.js";
 import { quotaManager } from "../../budget/quota-manager.js";
 import { logger } from "../../logger/index.js";
+import { loadResults } from "../../storage/results-store.js";
 
 export async function crawlRoutes(app: FastifyInstance) {
   app.addHook("onRequest", apiKeyAuth);
@@ -135,24 +136,29 @@ export async function crawlRoutes(app: FastifyInstance) {
     const queue = getCrawlQueue();
     const job = await queue.getJob(id);
 
-    if (!job) {
-      return reply.code(404).send({ error: "Job not found", code: "NOT_FOUND" });
+    if (job) {
+      const state = await job.getState();
+      if (state !== "completed") {
+        return reply.code(409).send({
+          error: "Job not yet completed",
+          code: "JOB_NOT_COMPLETED",
+          status: state,
+        });
+      }
+
+      const result = job.returnvalue as CrawlJobResultsResponse | undefined;
+      if (result) {
+        return reply.send(result);
+      }
     }
 
-    const state = await job.getState();
-    if (state !== "completed") {
-      return reply.code(409).send({
-        error: "Job not yet completed",
-        code: "JOB_NOT_COMPLETED",
-        status: state,
-      });
+    // Fallback: BullMQ job evicted or returnvalue missing -- try persistent store
+    const stored = await loadResults(id);
+    if (stored) {
+      logger.info({ jobId: id }, "Serving results from persistent store (BullMQ job evicted)");
+      return reply.send(stored);
     }
 
-    const result = job.returnvalue as CrawlJobResultsResponse | undefined;
-    if (!result) {
-      return reply.code(404).send({ error: "Results not available", code: "NO_RESULTS" });
-    }
-
-    return reply.send(result);
+    return reply.code(404).send({ error: "Job not found", code: "NOT_FOUND" });
   });
 }
