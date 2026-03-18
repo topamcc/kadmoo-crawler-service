@@ -9,7 +9,7 @@ class CrawlManager {
     jobConfig: CrawlJobConfig,
     onProgress: (progress: CrawlJobProgress) => void,
   ): Promise<CrawlExecutionResult> {
-    const result = await executeCrawl(jobConfig, onProgress);
+    const result = await executeCrawl(jobId, jobConfig, onProgress);
 
     // Upload full results to object storage if available
     if (objectStorage.isEnabled()) {

@@ -1,3 +1,8 @@
+import * as fs from "node:fs";
+import * as path from "node:path";
+import * as os from "node:os";
+import { createReadStream } from "node:fs";
+import { createInterface } from "node:readline";
 import { CheerioCrawler, PlaywrightCrawler, RequestQueue } from "crawlee";
 import { config } from "../config/index.js";
 import { logger } from "../logger/index.js";
@@ -16,21 +21,20 @@ export interface CrawlExecutionResult {
   reusedPages?: number;
 }
 
-interface PageMeta {
-  depth: number;
-  startTime: number;
-}
-
 const CHECKPOINT_SAVE_INTERVAL = 100;
 
+function safeJobIdForFilename(jobId: string): string {
+  return jobId.replace(/[^a-zA-Z0-9-_]/g, "_");
+}
+
 export async function executeCrawl(
+  jobId: string,
   jobConfig: CrawlJobConfig,
   onProgress: (progress: CrawlJobProgress) => void,
 ): Promise<CrawlExecutionResult> {
   const baseUrl = ensureAbsoluteUrl(jobConfig.url);
   const crawlStartTime = Date.now();
   const deadlineMs = jobConfig.maxDurationMinutes * 60 * 1000;
-  const pages: CrawledPageData[] = [];
   const failedUrls = new Set<string>();
   const enqueuedUrls = new Set<string>();
   let usedPlaywrightFallback = false;
@@ -38,6 +42,19 @@ export async function executeCrawl(
   const statusCodes: Record<number, number> = {};
   let resumed = false;
   let reusedPages = 0;
+
+  const ndjsonPath = path.join(os.tmpdir(), `crawl-${safeJobIdForFilename(jobId)}.ndjson`);
+  const writeStream = fs.createWriteStream(ndjsonPath, { flags: "w" });
+
+  let pagesCount = 0;
+  const visitedUrls = new Set<string>();
+  let totalResponseTime = 0;
+  let totalInternalLinks = 0;
+  let totalExternalLinks = 0;
+  let totalContentLength = 0;
+  let successfulPagesCount = 0;
+  let playwriteFallbackCount = 0;
+  const depthDistribution: Record<number, number> = {};
 
   const normalizedBase = normalizeUrl(baseUrl) ?? baseUrl;
   const log = logger.child({ url: baseUrl });
@@ -105,10 +122,20 @@ export async function executeCrawl(
       request.userData?.usedPlaywright ?? false,
       jobConfig.includeSubdomains,
     );
-    pages.push(pageData);
+
+    writeStream.write(JSON.stringify(pageData) + "\n");
+    pagesCount++;
+    visitedUrls.add(pageData.url);
+    totalResponseTime += pageData.responseTimeMs;
+    totalInternalLinks += pageData.internalLinks.length;
+    totalExternalLinks += pageData.externalLinks.length;
+    totalContentLength += pageData.contentLength;
+    if (pageData.statusCode >= 200 && pageData.statusCode < 400) successfulPagesCount++;
+    if (pageData.usedPlaywright) playwriteFallbackCount++;
+    depthDistribution[pageData.crawlDepth] = (depthDistribution[pageData.crawlDepth] ?? 0) + 1;
 
     // Enqueue internal links
-    if (depth < jobConfig.maxDepth && pages.length + enqueuedUrls.size < jobConfig.maxPages * 2) {
+    if (depth < jobConfig.maxDepth && pagesCount + enqueuedUrls.size < jobConfig.maxPages * 2) {
       for (const link of pageData.internalLinks) {
         const normalized = normalizeUrl(link.url);
         if (!normalized) continue;
@@ -129,26 +156,25 @@ export async function executeCrawl(
 
     onProgress({
       pagesQueued: enqueuedUrls.size,
-      pagesCrawled: pages.length + reusedPages,
+      pagesCrawled: pagesCount + reusedPages,
       pagesFailed: failedUrls.size,
       currentUrl: request.url,
       elapsedMs: Date.now() - crawlStartTime,
-      estimatedRemainingMs: pages.length > 0
-        ? Math.round(((Date.now() - crawlStartTime) / pages.length) * (enqueuedUrls.size - pages.length))
+      estimatedRemainingMs: pagesCount > 0
+        ? Math.round(((Date.now() - crawlStartTime) / pagesCount) * (enqueuedUrls.size - pagesCount))
         : undefined,
       ...(resumed && { resumed: true, reusedPages }),
     });
 
     // Periodic checkpoint save (resume support)
-    if (config.resume.enabled && pages.length > 0 && pages.length % CHECKPOINT_SAVE_INTERVAL === 0) {
-      const visitedSet = new Set(pages.map((p) => p.url));
-      const queueUrls = new Set([...enqueuedUrls].filter((u) => !visitedSet.has(u)));
+    if (config.resume.enabled && pagesCount > 0 && pagesCount % CHECKPOINT_SAVE_INTERVAL === 0) {
+      const queueUrls = new Set([...enqueuedUrls].filter((u) => !visitedUrls.has(u)));
       saveCheckpoint(jobConfig.siteId, normalizedBase, jobConfig, {
         queueUrls,
-        visitedUrls: pages.map((p) => p.url),
+        visitedUrls: [...visitedUrls],
         failedUrls,
         depthMap,
-        pagesCrawledCount: pages.length + reusedPages,
+        pagesCrawledCount: pagesCount + reusedPages,
       }).catch((err) => log.warn({ err }, "Checkpoint save failed"));
     }
   };
@@ -243,30 +269,40 @@ export async function executeCrawl(
     }
   }
 
+  await new Promise<void>((resolve, reject) => {
+    writeStream.end((err: Error | null | undefined) => (err ? reject(err) : resolve()));
+  });
+
   const crawlDurationMs = Date.now() - crawlStartTime;
-  const successfulPages = pages.filter((p) => p.statusCode >= 200 && p.statusCode < 400);
-  const totalResponseTime = pages.reduce((sum, p) => sum + p.responseTimeMs, 0);
-
-  const depthDistribution: Record<number, number> = {};
-  for (const page of pages) {
-    depthDistribution[page.crawlDepth] = (depthDistribution[page.crawlDepth] ?? 0) + 1;
-  }
-
   const summary: CrawlResultSummary = {
-    totalPages: pages.length,
-    successfulPages: successfulPages.length,
+    totalPages: pagesCount,
+    successfulPages: successfulPagesCount,
     failedPages: failedUrls.size,
-    totalInternalLinks: pages.reduce((sum, p) => sum + p.internalLinks.length, 0),
-    totalExternalLinks: pages.reduce((sum, p) => sum + p.externalLinks.length, 0),
-    averageResponseTimeMs: pages.length > 0 ? Math.round(totalResponseTime / pages.length) : 0,
-    totalContentLength: pages.reduce((sum, p) => sum + p.contentLength, 0),
+    totalInternalLinks,
+    totalExternalLinks,
+    averageResponseTimeMs: pagesCount > 0 ? Math.round(totalResponseTime / pagesCount) : 0,
+    totalContentLength,
     crawlDurationMs,
     uniqueStatusCodes: statusCodes,
     depthDistribution,
-    playwriteFallbackCount: usedPlaywrightFallback
-      ? pages.filter((p) => p.usedPlaywright).length
-      : 0,
+    playwriteFallbackCount: usedPlaywrightFallback ? playwriteFallbackCount : 0,
   };
+
+  const pages: CrawledPageData[] = [];
+  const rl = createInterface({
+    input: createReadStream(ndjsonPath),
+    crlfDelay: Infinity,
+  });
+  for await (const line of rl) {
+    const trimmed = line.trim();
+    if (trimmed) pages.push(JSON.parse(trimmed) as CrawledPageData);
+  }
+
+  try {
+    fs.unlinkSync(ndjsonPath);
+  } catch (err: unknown) {
+    log.warn({ err, ndjsonPath }, "Failed to delete temp NDJSON file");
+  }
 
   return {
     pages,
