@@ -53,7 +53,7 @@ async function processCrawlJob(job: Job<CrawlJobData>): Promise<CrawlJobResultsR
   }
 
   try {
-    const result = await crawlManager.execute(jobConfig, (progress) => {
+    const result = await crawlManager.execute(jobId, jobConfig, (progress) => {
       job.data.progress = progress;
       job.updateProgress(progress.pagesCrawled);
 

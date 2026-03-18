@@ -127,6 +127,29 @@ export async function runAnalysis(
     }
     pagesForDup.length = 0;
 
+    // Truncate large arrays to avoid "Invalid string length" when serializing for Supabase
+    const MAX_CRAWLED_URLS = 3000;
+    const MAX_AFFECTED_URLS = 100;
+    const trimmedReport = { ...report };
+    if (trimmedReport.crawledUrls && trimmedReport.crawledUrls.length > MAX_CRAWLED_URLS) {
+      trimmedReport.crawledUrls = trimmedReport.crawledUrls.slice(0, MAX_CRAWLED_URLS);
+    }
+    for (const section of Object.values(trimmedReport.sections) as { findings?: Array<{ affectedUrls?: string[] }> }[]) {
+      if (section?.findings) {
+        for (const f of section.findings) {
+          if (f.affectedUrls && f.affectedUrls.length > MAX_AFFECTED_URLS) {
+            f.affectedUrls = f.affectedUrls.slice(0, MAX_AFFECTED_URLS);
+          }
+        }
+      }
+    }
+    if (trimmedReport.sections.links?.data?.links?.length > 500) {
+      trimmedReport.sections.links.data.links = trimmedReport.sections.links.data.links.slice(0, 500);
+    }
+    if (trimmedReport.sections.links?.data?.brokenLinks?.length > 200) {
+      trimmedReport.sections.links.data.brokenLinks = trimmedReport.sections.links.data.brokenLinks.slice(0, 200);
+    }
+
     const updatePayload: Record<string, unknown> = {
       status: "completed",
       data_sources: dataSources,
@@ -139,7 +162,7 @@ export async function runAnalysis(
       links_score: report.sections.links.score,
       architecture_score: report.sections.architecture.score,
       keywords_score: report.sections.keywords.score,
-      report,
+      report: trimmedReport,
       issues_found: report.summary.issuesCount,
       warnings_found: report.summary.warningsCount,
       opportunities_found: report.summary.opportunitiesCount,

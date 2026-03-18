@@ -1,5 +1,5 @@
 import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
-import { gzipSync } from "node:zlib";
+import { gzipSync, gunzipSync } from "node:zlib";
 import { config } from "../config/index.js";
 import { logger } from "../logger/index.js";
 
@@ -51,10 +51,11 @@ class ObjectStorage {
       }),
     );
 
-    const body = await result.Body?.transformToString("utf-8");
-    if (!body) throw new Error(`Empty response for key: ${key}`);
+    const bytes = await result.Body?.transformToByteArray();
+    if (!bytes || bytes.length === 0) throw new Error(`Empty response for key: ${key}`);
 
-    return JSON.parse(body) as T;
+    const decompressed = gunzipSync(Buffer.from(bytes));
+    return JSON.parse(decompressed.toString("utf-8")) as T;
   }
 }
 
