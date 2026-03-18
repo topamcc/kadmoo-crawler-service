@@ -58,8 +58,8 @@ async function processCrawlJob(job: Job<CrawlJobData>): Promise<CrawlJobResultsR
       job.data.progress = progress;
       job.updateProgress(progress.pagesCrawled);
 
-      // Periodic webhook updates (every 20 pages)
-      if (jobConfig.webhookUrl && progress.pagesCrawled % 20 === 0 && progress.pagesCrawled > 0) {
+      // Periodic webhook updates (every 100 pages)
+      if (jobConfig.webhookUrl && progress.pagesCrawled % 100 === 0 && progress.pagesCrawled > 0) {
         webhookDispatcher.send(jobConfig.webhookUrl, {
           event: "crawl.progress",
           jobId,

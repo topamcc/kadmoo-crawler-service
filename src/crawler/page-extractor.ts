@@ -46,9 +46,8 @@ export function extractPageData(
       mainContent = $("body").text().replace(/\s+/g, " ").trim();
     }
   }
-  // Cap content length to avoid memory issues
-  if (mainContent.length > 50000) {
-    mainContent = mainContent.slice(0, 50000);
+  if (mainContent.length > 15000) {
+    mainContent = mainContent.slice(0, 15000);
   }
 
   const internalLinks: LinkData[] = [];
