@@ -98,6 +98,7 @@ export async function loadResultsFromLegacyPath(
   const prefix = `crawl-results/${siteId}/`;
   try {
     const keys = await objectStorage.listObjects(prefix);
+    logger.info({ jobId, siteId, prefix, keyCount: keys.length }, "Legacy path lookup");
     if (keys.length === 0) return null;
 
     // Sorted ascending; take the most recent (last)
@@ -115,7 +116,7 @@ export async function loadResultsFromLegacyPath(
       pages: raw.pages,
       artifactUrl: latestKey,
     };
-    logger.debug({ jobId, key: latestKey }, "Results loaded from legacy S3 path");
+    logger.info({ jobId, key: latestKey }, "Results loaded from legacy S3 path");
     return response;
   } catch (err) {
     logger.warn({ err, jobId, siteId }, "Failed to load results from legacy S3 path");
