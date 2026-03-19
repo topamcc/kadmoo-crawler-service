@@ -1,3 +1,6 @@
+import * as fs from "node:fs";
+import { createReadStream } from "node:fs";
+import { createInterface } from "node:readline";
 import { Worker, type Job } from "bullmq";
 import { getRedisConnection as getRedisUrl } from "./crawl-queue.js";
 import { config } from "../config/index.js";
@@ -5,14 +8,13 @@ import { logger } from "../logger/index.js";
 import { crawlManager } from "../crawler/manager.js";
 import { webhookDispatcher } from "../webhook/dispatcher.js";
 import { quotaManager } from "../budget/quota-manager.js";
-import { saveResults } from "../storage/results-store.js";
-import { deleteCheckpoint } from "../storage/checkpoint.js";
-import { ensureAbsoluteUrl, normalizeUrl } from "../crawler/url-normalizer.js";
+import { getSupabaseClient } from "../supabase/client.js";
+import { runAnalysis } from "../analysis/run-analysis.js";
 import type {
   CrawlJobConfig,
   CrawlJobProgress,
   CrawlJobResultsResponse,
-  CrawlJobStatusResponse,
+  CrawledPageData,
 } from "../shared/types.js";
 
 interface CrawlJobData {
@@ -22,101 +24,147 @@ interface CrawlJobData {
   usedPlaywrightFallback?: boolean;
 }
 
-async function processCrawlJob(job: Job<CrawlJobData>): Promise<CrawlJobResultsResponse> {
-  const { jobId, config: jobConfig } = job.data;
-  const log = logger.child({ jobId, url: jobConfig.url });
-
-  log.info("Starting crawl job");
-  await quotaManager.recordJobStart(jobConfig.siteId, jobConfig.maxPages);
-  const startTime = Date.now();
-
-  // Notify webhook: started
-  const makeStatusPayload = (overrides: Partial<CrawlJobStatusResponse> = {}): CrawlJobStatusResponse => ({
-    jobId,
-    status: "running",
-    progress: job.data.progress ?? {
-      pagesQueued: 0,
-      pagesCrawled: 0,
-      pagesFailed: 0,
-      elapsedMs: Date.now() - startTime,
-    },
-    config: jobConfig,
-    createdAt: new Date(job.timestamp).toISOString(),
-    startedAt: new Date().toISOString(),
-    ...overrides,
+async function readNdjsonToPages(ndjsonPath: string): Promise<CrawledPageData[]> {
+  const pages: CrawledPageData[] = [];
+  const rl = createInterface({
+    input: createReadStream(ndjsonPath),
+    crlfDelay: Infinity,
   });
-
-  if (jobConfig.webhookUrl) {
-    await webhookDispatcher.send(jobConfig.webhookUrl, {
-      event: "crawl.started",
-      jobId,
-      timestamp: new Date().toISOString(),
-      data: makeStatusPayload(),
-    });
+  for await (const line of rl) {
+    const trimmed = line.trim();
+    if (trimmed) pages.push(JSON.parse(trimmed) as CrawledPageData);
   }
+  return pages;
+}
+
+async function processCrawlJob(job: Job<CrawlJobData>): Promise<void> {
+  const { jobId, config: jobConfig } = job.data;
+  const { auditId, url, siteId, webhookUrl } = jobConfig;
+  const log = logger.child({ jobId, auditId, url: jobConfig.url });
+
+  log.info("Starting crawl + analysis job");
+  await quotaManager.recordJobStart(siteId, jobConfig.maxPages);
+
+  const supabase = getSupabaseClient();
 
   try {
-    const result = await crawlManager.execute(jobId, jobConfig, (progress) => {
+    const { error: updateErr } = await (supabase as any)
+      .from("site_audits")
+      .update({
+        status: "crawling",
+        progress: {
+          percent: 5,
+          phase: "crawling",
+          current_step: "מתחיל סריקה...",
+        },
+      })
+      .eq("id", auditId);
+    if (updateErr) log.warn({ err: updateErr }, "Initial progress update failed");
+
+    const result = await crawlManager.execute(jobId, jobConfig, async (progress) => {
       job.data.progress = progress;
       job.updateProgress(progress.pagesCrawled);
 
-      // Periodic webhook updates (every 100 pages)
-      if (jobConfig.webhookUrl && progress.pagesCrawled % 100 === 0 && progress.pagesCrawled > 0) {
-        webhookDispatcher.send(jobConfig.webhookUrl, {
-          event: "crawl.progress",
-          jobId,
-          timestamp: new Date().toISOString(),
-          data: makeStatusPayload({ progress }),
-        }).catch((err) => log.warn({ err }, "Progress webhook failed"));
+      if (progress.pagesCrawled > 0 && progress.pagesCrawled % 100 === 0) {
+        const pct = Math.min(80, Math.round((progress.pagesCrawled / (progress.pagesQueued || progress.pagesCrawled)) * 80) || 20);
+        const { error: progErr } = await (supabase as any)
+          .from("site_audits")
+          .update({
+            status: "crawling",
+            pages_crawled: progress.pagesCrawled,
+            progress: {
+              percent: pct,
+              phase: "crawling",
+              current_step: `נסרקו ${progress.pagesCrawled} דפים...`,
+              pagesQueued: progress.pagesQueued,
+              pagesCrawled: progress.pagesCrawled,
+              estimatedRemainingMs: progress.estimatedRemainingMs,
+            },
+          })
+          .eq("id", auditId);
+        if (progErr) log.warn({ err: progErr }, "Progress update failed");
       }
     });
 
     job.data.usedPlaywrightFallback = result.usedPlaywrightFallback;
 
-    const response: CrawlJobResultsResponse = {
+    log.info({ pages: result.summary.totalPages }, "Crawl completed, loading pages for analysis...");
+
+    const pages = await readNdjsonToPages(result.ndjsonPath);
+
+    try {
+      fs.unlinkSync(result.ndjsonPath);
+    } catch (e) {
+      log.warn({ err: e, ndjsonPath: result.ndjsonPath }, "Failed to delete temp NDJSON");
+    }
+
+    const results: CrawlJobResultsResponse = {
       jobId,
       status: "completed",
       summary: result.summary,
-      pages: result.pages,
-      artifactUrl: result.artifactUrl,
-      ...(result.resumed && { resumed: true, reusedPages: result.reusedPages }),
+      pages,
     };
 
-    // crawl.completed webhook is sent from worker.on("completed") so it fires
-    // only after BullMQ has stored returnvalue and /crawl/:id/results is available.
+    const { success, error } = await runAnalysis({
+      auditId,
+      url: url.trim(),
+      siteId: siteId ?? "",
+      results,
+      supabase,
+      pagesQueued: result.summary.totalPages,
+    });
 
-    log.info(
-      { pages: result.summary.totalPages, durationMs: result.summary.crawlDurationMs },
-      "Crawl job completed",
-    );
+    results.pages.length = 0;
 
-    const seedUrl = normalizeUrl(ensureAbsoluteUrl(jobConfig.url)) ?? ensureAbsoluteUrl(jobConfig.url);
-    await deleteCheckpoint(jobConfig.siteId, seedUrl).catch((e) =>
-      log.warn({ err: e }, "Failed to delete checkpoint"),
-    );
+    if (!success) {
+      throw new Error(error ?? "Analysis failed");
+    }
 
-    return response;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    log.error({ err: error }, "Crawl job failed");
-
-    if (jobConfig.webhookUrl) {
-      await webhookDispatcher.send(jobConfig.webhookUrl, {
-        event: "crawl.failed",
+    if (webhookUrl) {
+      await webhookDispatcher.send(webhookUrl, {
+        event: "audit.completed",
         jobId,
         timestamp: new Date().toISOString(),
-        data: makeStatusPayload({
+        data: {
+          auditId,
+          jobId,
+          status: "completed",
+        },
+      }).catch((err) => log.warn({ err }, "audit.completed webhook failed"));
+    }
+
+    log.info({ auditId }, "Audit job completed");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    log.error({ err: error }, "Audit job failed");
+
+    const { error: failErr } = await (supabase as any)
+      .from("site_audits")
+      .update({
+        status: "failed",
+        error_message: message,
+        progress: { percent: 0, phase: "failed", current_step: message },
+      })
+      .eq("id", auditId);
+    if (failErr) log.warn({ err: failErr }, "Failed to update audit status");
+
+    if (webhookUrl) {
+      await webhookDispatcher.send(webhookUrl, {
+        event: "audit.failed",
+        jobId,
+        timestamp: new Date().toISOString(),
+        data: {
+          auditId,
+          jobId,
           status: "failed",
           error: message,
-          completedAt: new Date().toISOString(),
-        }),
+        },
       }).catch(() => {});
     }
 
-    const seedUrl = normalizeUrl(ensureAbsoluteUrl(jobConfig.url)) ?? ensureAbsoluteUrl(jobConfig.url);
-    await deleteCheckpoint(jobConfig.siteId, seedUrl).catch(() => {});
-
     throw error;
+  } finally {
+    await quotaManager.recordJobEnd();
   }
 }
 
@@ -134,55 +182,8 @@ export async function startWorker(): Promise<Worker> {
     concurrency: config.budget.maxConcurrentJobs,
   });
 
-  workerInstance.on("completed", async (job, result: CrawlJobResultsResponse) => {
-    logger.info({ jobId: job.id }, "Job completed");
-    quotaManager.recordJobEnd().catch((e) =>
-      logger.warn({ err: e }, "Failed to decrement active_jobs on complete"),
-    );
-
-    const jobConfig = job.data.config;
-
-    // CRITICAL: Send webhook FIRST so the app gets crawl.completed even if saveResults OOMs.
-    // The app triggers /api/audit/analyze which fetches from GET /crawl/:id/results (BullMQ).
-    if (jobConfig?.webhookUrl && result) {
-      const payload = {
-        jobId: result.jobId,
-        status: "completed" as const,
-        progress: {
-          pagesQueued: result.summary.totalPages,
-          pagesCrawled: result.summary.totalPages,
-          pagesFailed: result.summary.failedPages,
-          elapsedMs: result.summary.crawlDurationMs,
-        },
-        config: jobConfig,
-        createdAt: new Date(job.timestamp).toISOString(),
-        startedAt: new Date(job.timestamp).toISOString(),
-        completedAt: new Date().toISOString(),
-        usedPlaywrightFallback: job.data.usedPlaywrightFallback,
-        artifactUrl: result.artifactUrl ?? `results/${result.jobId}.json.gz`,
-        ...(result.resumed && { resumed: true, reusedPages: result.reusedPages }),
-      };
-      await webhookDispatcher.send(jobConfig.webhookUrl, {
-        event: "crawl.completed",
-        jobId: result.jobId,
-        timestamp: new Date().toISOString(),
-        data: payload,
-      }).catch((err) => logger.warn({ err, jobId: job.id }, "crawl.completed webhook failed"));
-    }
-
-    // Fire-and-forget: persist to backup store (non-critical, BullMQ has data for 24h)
-    if (result && job.id) {
-      saveResults(job.id, result).catch((err) =>
-        logger.warn({ err, jobId: job.id }, "Failed to persist results to results-store"),
-      );
-    }
-  });
-
   workerInstance.on("failed", (job, err) => {
     logger.error({ jobId: job?.id, err }, "Job failed");
-    quotaManager.recordJobEnd().catch((e) =>
-      logger.warn({ err: e }, "Failed to decrement active_jobs on failure"),
-    );
   });
 
   workerInstance.on("error", (err) => {

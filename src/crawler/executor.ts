@@ -1,29 +1,20 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
-import { createReadStream } from "node:fs";
-import { createInterface } from "node:readline";
 import { CheerioCrawler, PlaywrightCrawler, RequestQueue } from "crawlee";
 import { config } from "../config/index.js";
 import { logger } from "../logger/index.js";
 import { extractPageData } from "./page-extractor.js";
 import { normalizeUrl, isSameDomain, ensureAbsoluteUrl, isNonHtmlResource } from "./url-normalizer.js";
 import { fetchRobotsRules, isUrlAllowed } from "./robots-parser.js";
-import { loadCheckpoint, saveCheckpoint } from "../storage/checkpoint.js";
-import type { CrawlJobConfig, CrawledPageData, CrawlJobProgress, CrawlResultSummary } from "../shared/types.js";
+import type { CrawlJobConfig, CrawlJobProgress, CrawlResultSummary } from "../shared/types.js";
 
 export interface CrawlExecutionResult {
-  pages: CrawledPageData[];
   summary: CrawlResultSummary;
   usedPlaywrightFallback: boolean;
-  artifactUrl?: string;
-  resumed?: boolean;
-  reusedPages?: number;
-  /** Path to NDJSON file (for streaming upload). Caller must delete after use. */
-  ndjsonPath?: string;
+  /** Path to NDJSON file. Caller must stream-read and delete after use. */
+  ndjsonPath: string;
 }
-
-const CHECKPOINT_SAVE_INTERVAL = 100;
 
 function safeJobIdForFilename(jobId: string): string {
   return jobId.replace(/[^a-zA-Z0-9-_]/g, "_");
@@ -42,8 +33,6 @@ export async function executeCrawl(
   let usedPlaywrightFallback = false;
   const depthMap = new Map<string, number>();
   const statusCodes: Record<number, number> = {};
-  let resumed = false;
-  let reusedPages = 0;
 
   const ndjsonPath = path.join(os.tmpdir(), `crawl-${safeJobIdForFilename(jobId)}.ndjson`);
   const writeStream = fs.createWriteStream(ndjsonPath, { flags: "w" });
@@ -61,29 +50,8 @@ export async function executeCrawl(
   const normalizedBase = normalizeUrl(baseUrl) ?? baseUrl;
   const log = logger.child({ url: baseUrl });
 
-  let checkpoint: Awaited<ReturnType<typeof loadCheckpoint>> = null;
-  if (config.resume.enabled) {
-    checkpoint = await loadCheckpoint(jobConfig.siteId, normalizedBase, jobConfig);
-  }
-
-  if (checkpoint) {
-    resumed = true;
-    reusedPages = checkpoint.pages_crawled_count;
-    for (const u of checkpoint.queue_urls) enqueuedUrls.add(u);
-    for (const u of checkpoint.visited_urls) enqueuedUrls.add(u); // avoid re-enqueueing
-    for (const [u, d] of Object.entries(checkpoint.depth_map)) depthMap.set(u, d);
-    for (const u of checkpoint.failed_urls) failedUrls.add(u);
-    log.info(
-      { resume_reason: "checkpoint_valid", reusedPages, queueSize: checkpoint.queue_urls.length },
-      "Resumed from checkpoint",
-    );
-  } else {
-    enqueuedUrls.add(normalizedBase);
-    depthMap.set(normalizedBase, 0);
-    if (config.resume.enabled) {
-      log.info({ fresh_reason: "no_checkpoint_or_expired_or_config_mismatch" }, "Fresh crawl");
-    }
-  }
+  enqueuedUrls.add(normalizedBase);
+  depthMap.set(normalizedBase, 0);
 
   // Robots.txt
   let disallowedPaths: string[] = [];
@@ -94,15 +62,7 @@ export async function executeCrawl(
 
   // Cheerio-based crawling
   const requestQueue = await RequestQueue.open(`crawl-${Date.now()}` as any);
-  if (!resumed) {
-    await requestQueue.addRequest({ url: normalizedBase, userData: { depth: 0 } });
-  } else {
-    for (const url of checkpoint!.queue_urls) {
-      if (isNonHtmlResource(url)) continue; // Skip PDFs, images, etc. when resuming
-      const depth = depthMap.get(url) ?? 0;
-      await requestQueue.addRequest({ url, userData: { depth, startTime: Date.now() } });
-    }
-  }
+  await requestQueue.addRequest({ url: normalizedBase, userData: { depth: 0 } });
 
   const handlePage = async (ctx: any) => {
     const { request, body } = ctx;
@@ -142,7 +102,7 @@ export async function executeCrawl(
         const normalized = normalizeUrl(link.url);
         if (!normalized) continue;
         if (enqueuedUrls.has(normalized)) continue;
-        if (isNonHtmlResource(normalized)) continue; // CheerioCrawler only supports HTML
+        if (isNonHtmlResource(normalized)) continue;
         if (!isSameDomain(normalized, baseUrl, jobConfig.includeSubdomains)) continue;
         if (jobConfig.respectRobotsTxt && !isUrlAllowed(normalized, disallowedPaths)) continue;
         if (enqueuedUrls.size >= jobConfig.maxPages) break;
@@ -158,46 +118,29 @@ export async function executeCrawl(
 
     onProgress({
       pagesQueued: enqueuedUrls.size,
-      pagesCrawled: pagesCount + reusedPages,
+      pagesCrawled: pagesCount,
       pagesFailed: failedUrls.size,
       currentUrl: request.url,
       elapsedMs: Date.now() - crawlStartTime,
       estimatedRemainingMs: pagesCount > 0
         ? Math.round(((Date.now() - crawlStartTime) / pagesCount) * (enqueuedUrls.size - pagesCount))
         : undefined,
-      ...(resumed && { resumed: true, reusedPages }),
     });
-
-    // Periodic checkpoint save (resume support)
-    if (config.resume.enabled && pagesCount > 0 && pagesCount % CHECKPOINT_SAVE_INTERVAL === 0) {
-      const queueUrls = new Set([...enqueuedUrls].filter((u) => !visitedUrls.has(u)));
-      saveCheckpoint(jobConfig.siteId, normalizedBase, jobConfig, {
-        queueUrls,
-        visitedUrls: [...visitedUrls],
-        failedUrls,
-        depthMap,
-        pagesCrawledCount: pagesCount + reusedPages,
-      }).catch((err) => log.warn({ err }, "Checkpoint save failed"));
-    }
   };
 
-  const handleFailed = async (ctx: any, error?: Error) => {
+  const handleFailed = async (ctx: any) => {
     failedUrls.add(ctx.request.url);
     log.warn({ url: ctx.request.url, error: ctx.error?.message }, "Page crawl failed");
   };
 
-  const effectiveMaxRequests = resumed
-    ? Math.max(0, jobConfig.maxPages - reusedPages)
-    : jobConfig.maxPages;
-
-  // Phase 1: Cheerio crawl
-  if (!jobConfig.forcePlaywright && effectiveMaxRequests > 0) {
+  // Phase 1: Cheerio crawl with Crawlee best practices
+  if (!jobConfig.forcePlaywright && jobConfig.maxPages > 0) {
     const crawler = new CheerioCrawler({
       requestQueue,
       maxConcurrency: jobConfig.concurrency,
-      maxRequestsPerCrawl: effectiveMaxRequests,
+      maxRequestsPerCrawl: jobConfig.maxPages,
       requestHandlerTimeoutSecs: Math.ceil(jobConfig.timeoutMs / 1000),
-      maxRequestRetries: 2,
+      maxRequestRetries: 4,
       additionalMimeTypes: ["application/xhtml+xml"],
       requestHandler: handlePage,
       failedRequestHandler: handleFailed,
@@ -226,10 +169,8 @@ export async function executeCrawl(
       const pwQueue = await RequestQueue.open(`pw-crawl-${Date.now()}` as any);
 
       if (jobConfig.forcePlaywright) {
-        // Full Playwright crawl
         await pwQueue.addRequest({ url: normalizedBase, userData: { depth: 0, startTime: Date.now(), usedPlaywright: true } });
       } else {
-        // Only retry failed URLs
         for (const url of failedUrls) {
           const depth = depthMap.get(url) ?? 0;
           await pwQueue.addRequest({ url, userData: { depth, startTime: Date.now(), usedPlaywright: true } });
@@ -239,9 +180,9 @@ export async function executeCrawl(
       const pwCrawler = new PlaywrightCrawler({
         requestQueue: pwQueue,
         maxConcurrency: Math.min(jobConfig.concurrency, config.crawl.playwrightMaxConcurrency),
-        maxRequestsPerCrawl: jobConfig.forcePlaywright ? effectiveMaxRequests : failedUrls.size,
+        maxRequestsPerCrawl: jobConfig.forcePlaywright ? jobConfig.maxPages : failedUrls.size,
         requestHandlerTimeoutSecs: Math.ceil(jobConfig.timeoutMs / 1000) * 2,
-        maxRequestRetries: 1,
+        maxRequestRetries: 2,
         launchContext: {
           launchOptions: {
             headless: true,
@@ -294,21 +235,9 @@ export async function executeCrawl(
     playwriteFallbackCount: usedPlaywrightFallback ? playwriteFallbackCount : 0,
   };
 
-  const pages: CrawledPageData[] = [];
-  const rl = createInterface({
-    input: createReadStream(ndjsonPath),
-    crlfDelay: Infinity,
-  });
-  for await (const line of rl) {
-    const trimmed = line.trim();
-    if (trimmed) pages.push(JSON.parse(trimmed) as CrawledPageData);
-  }
-
   return {
-    pages,
     summary,
     usedPlaywrightFallback,
     ndjsonPath,
-    ...(resumed && { resumed: true, reusedPages }),
   };
 }

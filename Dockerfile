@@ -27,4 +27,4 @@ EXPOSE 4000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD curl -f http://localhost:4000/health || exit 1
 ENV CRAWLEE_AVAILABLE_MEMORY_RATIO=0.8
-CMD ["node", "--max-old-space-size=5120", "dist/index.js"]
+CMD ["node", "--max-old-space-size=7168", "dist/index.js"]

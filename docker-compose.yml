@@ -11,8 +11,8 @@ services:
     deploy:
       resources:
         limits:
-          memory: 6G
-          cpus: "3.0"
+          memory: 10G
+          cpus: "4.0"
 
   redis:
     image: redis:7-alpine

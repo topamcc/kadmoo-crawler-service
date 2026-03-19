@@ -16,6 +16,7 @@ export type CrawlJobStatus =
   | "cancelled";
 
 export interface CrawlJobConfig {
+  auditId: string;
   url: string;
   siteId?: string;
   maxPages: number;
@@ -138,14 +139,10 @@ export interface CrawlResultSummary {
 // ---------------------------------------------------------------------------
 
 export type WebhookEventType =
-  | "crawl.started"
-  | "crawl.progress"
-  | "crawl.completed"
-  | "crawl.failed"
-  | "analyze.completed"
-  | "analyze.failed";
+  | "audit.completed"
+  | "audit.failed";
 
-export interface AnalyzeEventData {
+export interface AuditEventData {
   auditId: string;
   jobId: string;
   status: "completed" | "failed";
@@ -156,7 +153,7 @@ export interface WebhookPayload {
   event: WebhookEventType;
   jobId: string;
   timestamp: string;
-  data: CrawlJobStatusResponse | AnalyzeEventData;
+  data: AuditEventData;
 }
 
 // ---------------------------------------------------------------------------
@@ -175,8 +172,6 @@ export interface HealthResponse {
   };
   redis: boolean;
   active_jobs?: number;
-  stale_checkpoints?: number;
-  resume_hit_rate_24h?: number;
 }
 
 // ---------------------------------------------------------------------------

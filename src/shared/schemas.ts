@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 export const createCrawlJobSchema = z.object({
+  auditId: z.string().min(1, "auditId is required"),
   url: z
     .string()
     .min(1, "URL is required")

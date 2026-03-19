@@ -4,7 +4,6 @@ import { createCrawlJobSchema } from "../../shared/schemas.js";
 import type {
   CreateCrawlJobResponse,
   CrawlJobStatusResponse,
-  CrawlJobResultsResponse,
   CrawlJobConfig,
 } from "../../shared/types.js";
 import { getCrawlQueue } from "../../queue/crawl-queue.js";
@@ -12,7 +11,6 @@ import { config } from "../../config/index.js";
 import { apiKeyAuth } from "../middleware/auth.js";
 import { quotaManager } from "../../budget/quota-manager.js";
 import { logger } from "../../logger/index.js";
-import { loadResults } from "../../storage/results-store.js";
 
 export async function crawlRoutes(app: FastifyInstance) {
   app.addHook("onRequest", apiKeyAuth);
@@ -53,6 +51,7 @@ export async function crawlRoutes(app: FastifyInstance) {
 
     const jobId = nanoid(21);
     const jobConfig: CrawlJobConfig = {
+      auditId: input.auditId,
       url: input.url,
       siteId: input.siteId,
       maxPages: input.maxPages ?? config.crawl.defaultMaxPages,
@@ -62,7 +61,7 @@ export async function crawlRoutes(app: FastifyInstance) {
       timeoutMs: input.timeoutMs ?? config.crawl.defaultTimeoutMs,
       respectRobotsTxt: input.respectRobotsTxt ?? true,
       forcePlaywright: input.forcePlaywright ?? false,
-      includeSubdomains: input.includeSubdomains ?? true,
+      includeSubdomains: input.includeSubdomains ?? false,
       webhookUrl: input.webhookUrl,
       idempotencyKey: input.idempotencyKey,
     };
@@ -130,34 +129,11 @@ export async function crawlRoutes(app: FastifyInstance) {
   });
 
   // ── GET /crawl/:id/results ───────────────────────────
+  // Results are not persisted; analysis runs in-process. Kept for compatibility.
   app.get<{ Params: { id: string } }>("/crawl/:id/results", async (request, reply) => {
-    const { id } = request.params;
-    const queue = getCrawlQueue();
-    const job = await queue.getJob(id);
-
-    if (job) {
-      const state = await job.getState();
-      if (state !== "completed") {
-        return reply.code(409).send({
-          error: "Job not yet completed",
-          code: "JOB_NOT_COMPLETED",
-          status: state,
-        });
-      }
-
-      const result = job.returnvalue as CrawlJobResultsResponse | undefined;
-      if (result) {
-        return reply.send(result);
-      }
-    }
-
-    // Fallback: BullMQ job evicted or returnvalue missing -- try persistent store
-    const stored = await loadResults(id);
-    if (stored) {
-      logger.info({ jobId: id }, "Serving results from persistent store (BullMQ job evicted)");
-      return reply.send(stored);
-    }
-
-    return reply.code(404).send({ error: "Job not found", code: "NOT_FOUND" });
+    return reply.code(404).send({
+      error: "Results are not persisted. Analysis runs in-process.",
+      code: "NOT_PERSISTED",
+    });
   });
 }
