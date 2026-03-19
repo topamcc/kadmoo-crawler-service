@@ -46,10 +46,16 @@ export const config = {
   crawl: {
     defaultMaxPages: envInt("DEFAULT_MAX_PAGES", 10000),
     defaultMaxDepth: envInt("DEFAULT_MAX_DEPTH", 10),
-    defaultConcurrency: envInt("DEFAULT_CONCURRENCY", 12),
+    defaultConcurrency: envInt("DEFAULT_CONCURRENCY", 4),
+    defaultMaxRequestsPerMinute: envInt("DEFAULT_MAX_REQUESTS_PER_MINUTE", 150),
     defaultTimeoutMs: envInt("DEFAULT_TIMEOUT_MS", 20000),
     defaultMaxDurationMinutes: envInt("DEFAULT_MAX_DURATION_MINUTES", 60),
     playwrightMaxConcurrency: envInt("PLAYWRIGHT_MAX_CONCURRENCY", 4),
+  },
+
+  queue: {
+    workerLockDurationMs: envInt("WORKER_LOCK_DURATION_MS", 3600000),
+    workerLockRenewTimeMs: envInt("WORKER_LOCK_RENEW_MS", 300000),
   },
 
   budget: {

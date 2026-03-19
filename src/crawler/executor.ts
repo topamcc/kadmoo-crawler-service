@@ -7,6 +7,7 @@ import { logger } from "../logger/index.js";
 import { extractPageData } from "./page-extractor.js";
 import { normalizeUrl, isSameDomain, ensureAbsoluteUrl, isNonHtmlResource } from "./url-normalizer.js";
 import { fetchRobotsRules, isUrlAllowed } from "./robots-parser.js";
+import { getCrawlPolicy } from "./crawl-policy.js";
 import type { CrawlJobConfig, CrawlJobProgress, CrawlResultSummary } from "../shared/types.js";
 
 export interface CrawlExecutionResult {
@@ -133,15 +134,29 @@ export async function executeCrawl(
     log.warn({ url: ctx.request.url, error: ctx.error?.message }, "Page crawl failed");
   };
 
+  const policy = getCrawlPolicy(baseUrl, {
+    concurrency: jobConfig.concurrency ?? config.crawl.defaultConcurrency,
+    maxRequestsPerMinute: config.crawl.defaultMaxRequestsPerMinute,
+    timeoutMs: jobConfig.timeoutMs,
+  });
+  if (policy.useHttp1 || policy.maxConcurrency < (jobConfig.concurrency ?? config.crawl.defaultConcurrency)) {
+    log.info({ policy }, "Using defensive crawl policy");
+  }
+
   // Phase 1: Cheerio crawl with Crawlee best practices
   if (!jobConfig.forcePlaywright && jobConfig.maxPages > 0) {
     const crawler = new CheerioCrawler({
       requestQueue,
-      maxConcurrency: jobConfig.concurrency,
+      maxConcurrency: policy.maxConcurrency,
+      maxRequestsPerMinute: policy.maxRequestsPerMinute,
+      minConcurrency: 2,
       maxRequestsPerCrawl: jobConfig.maxPages,
-      requestHandlerTimeoutSecs: Math.ceil(jobConfig.timeoutMs / 1000),
+      requestHandlerTimeoutSecs: Math.ceil((policy.requestTimeoutMs ?? jobConfig.timeoutMs) / 1000),
       maxRequestRetries: 4,
       additionalMimeTypes: ["application/xhtml+xml"],
+      preNavigationHooks: policy.useHttp1
+        ? [(_ctx: any, gotOptions: any) => { gotOptions.http2 = false; }]
+        : undefined,
       requestHandler: handlePage,
       failedRequestHandler: handleFailed,
     });
@@ -179,9 +194,9 @@ export async function executeCrawl(
 
       const pwCrawler = new PlaywrightCrawler({
         requestQueue: pwQueue,
-        maxConcurrency: Math.min(jobConfig.concurrency, config.crawl.playwrightMaxConcurrency),
+        maxConcurrency: Math.min(policy.maxConcurrency, config.crawl.playwrightMaxConcurrency),
         maxRequestsPerCrawl: jobConfig.forcePlaywright ? jobConfig.maxPages : failedUrls.size,
-        requestHandlerTimeoutSecs: Math.ceil(jobConfig.timeoutMs / 1000) * 2,
+        requestHandlerTimeoutSecs: Math.ceil((policy.requestTimeoutMs ?? jobConfig.timeoutMs) / 1000) * 2,
         maxRequestRetries: 2,
         launchContext: {
           launchOptions: {

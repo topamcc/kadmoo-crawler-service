@@ -47,6 +47,17 @@ async function processCrawlJob(job: Job<CrawlJobData>): Promise<void> {
 
   const supabase = getSupabaseClient();
 
+  const { data: audit } = await (supabase as any)
+    .from("site_audits")
+    .select("status")
+    .eq("id", auditId)
+    .single();
+
+  if ((audit as { status?: string } | null)?.status === "completed") {
+    log.info({ auditId }, "Audit already completed (idempotency), skipping");
+    return;
+  }
+
   try {
     const { error: updateErr } = await (supabase as any)
       .from("site_audits")
@@ -180,6 +191,8 @@ export async function startWorker(): Promise<Worker> {
   workerInstance = new Worker<CrawlJobData>("crawl-jobs", processCrawlJob, {
     connection: { url: getRedisUrl() },
     concurrency: config.budget.maxConcurrentJobs,
+    lockDuration: config.queue.workerLockDurationMs,
+    lockRenewTime: config.queue.workerLockRenewTimeMs,
   });
 
   workerInstance.on("failed", (job, err) => {

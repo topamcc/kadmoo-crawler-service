@@ -77,14 +77,15 @@ export function extractPageData(
     }
   });
 
-  // Extract image URLs from img[src]
+  // Extract image URLs from img[src], img[srcset], picture > source[srcset], picture > source[src]
   const images: { src: string }[] = [];
   const seenImageUrls = new Set<string>();
-  $("img[src]").each((_, el) => {
-    const src = $(el).attr("src")?.trim();
-    if (!src || src.startsWith("data:") || src.startsWith("blob:")) return;
+
+  function addImageUrl(raw: string): void {
+    const s = raw?.trim();
+    if (!s || s.startsWith("data:") || s.startsWith("blob:")) return;
     try {
-      const resolved = new URL(src, baseUrl).href;
+      const resolved = new URL(s, baseUrl).href;
       if (!seenImageUrls.has(resolved)) {
         seenImageUrls.add(resolved);
         images.push({ src: resolved });
@@ -92,6 +93,33 @@ export function extractPageData(
     } catch {
       /* skip invalid URLs */
     }
+  }
+
+  function parseSrcset(srcset: string): void {
+    if (!srcset?.trim()) return;
+    // HTML5 srcset: "url1 480w, url2 800w" or "url1 1x, url2 2x". URL can have commas in query params.
+    const regex = /(\S+)(?:\s+[\d.]+[wx])?(?=\s*,\s*|$)/g;
+    let m: RegExpExecArray | null;
+    while ((m = regex.exec(srcset)) !== null) {
+      addImageUrl(m[1]);
+    }
+  }
+
+  $("img[src]").each((_, el) => {
+    const src = $(el).attr("src");
+    if (src) addImageUrl(src);
+  });
+  $("img[srcset]").each((_, el) => {
+    const srcset = $(el).attr("srcset");
+    if (srcset) parseSrcset(srcset);
+  });
+  $("picture source[srcset]").each((_, el) => {
+    const srcset = $(el).attr("srcset");
+    if (srcset) parseSrcset(srcset);
+  });
+  $("picture source[src]").each((_, el) => {
+    const src = $(el).attr("src");
+    if (src) addImageUrl(src);
   });
 
   const contentType = "text/html";
