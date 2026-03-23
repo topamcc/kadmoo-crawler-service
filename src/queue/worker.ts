@@ -114,6 +114,7 @@ async function processCrawlJob(job: Job<CrawlJobData>): Promise<void> {
       status: "completed",
       summary: result.summary,
       pages,
+      sitemap: result.sitemap,
     };
 
     const { success, error } = await runAnalysis({
@@ -122,7 +123,8 @@ async function processCrawlJob(job: Job<CrawlJobData>): Promise<void> {
       siteId: siteId ?? "",
       results,
       supabase,
-      pagesQueued: result.summary.totalPages,
+      pagesQueued:
+        result.summary.finalEnqueuedUrlCount ?? result.summary.totalPages,
     });
 
     results.pages.length = 0;

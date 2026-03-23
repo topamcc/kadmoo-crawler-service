@@ -8,13 +8,20 @@ import { extractPageData } from "./page-extractor.js";
 import { normalizeUrl, isSameDomain, ensureAbsoluteUrl, isNonHtmlResource } from "./url-normalizer.js";
 import { fetchRobotsRules, isUrlAllowed } from "./robots-parser.js";
 import { getCrawlPolicy } from "./crawl-policy.js";
-import type { CrawlJobConfig, CrawlJobProgress, CrawlResultSummary } from "../shared/types.js";
+import type {
+  CrawlJobConfig,
+  CrawlJobProgress,
+  CrawlResultSummary,
+  CrawlSitemapSnapshot,
+} from "../shared/types.js";
+import { discoverSitemapUrls } from "./sitemap-discovery.js";
 
 export interface CrawlExecutionResult {
   summary: CrawlResultSummary;
   usedPlaywrightFallback: boolean;
   /** Path to NDJSON file. Caller must stream-read and delete after use. */
   ndjsonPath: string;
+  sitemap?: CrawlSitemapSnapshot;
 }
 
 function safeJobIdForFilename(jobId: string): string {
@@ -54,16 +61,63 @@ export async function executeCrawl(
   enqueuedUrls.add(normalizedBase);
   depthMap.set(normalizedBase, 0);
 
-  // Robots.txt
-  let disallowedPaths: string[] = [];
-  if (jobConfig.respectRobotsTxt) {
-    const rules = await fetchRobotsRules(baseUrl);
-    disallowedPaths = rules.disallowed;
+  // Robots.txt (always fetch for Sitemap: lines; disallowed paths only when respecting robots)
+  const rules = await fetchRobotsRules(baseUrl);
+  const disallowedPaths = jobConfig.respectRobotsTxt ? rules.disallowed : [];
+
+  let sitemapSnapshot: CrawlSitemapSnapshot | undefined;
+  let sitemapSeedsEnqueued = 0;
+
+  if (jobConfig.maxPages > 0) {
+    const discovery = await discoverSitemapUrls(
+      baseUrl,
+      jobConfig,
+      disallowedPaths,
+      rules.sitemapUrls,
+    );
+
+    for (const u of discovery.urls) {
+      if (enqueuedUrls.size >= jobConfig.maxPages) break;
+      if (u === normalizedBase || enqueuedUrls.has(u)) continue;
+
+      enqueuedUrls.add(u);
+      depthMap.set(u, 0);
+      sitemapSeedsEnqueued++;
+    }
+
+    sitemapSnapshot = {
+      exists: discovery.exists,
+      url: discovery.primarySitemapUrl,
+      urls: discovery.urls,
+      urlCount: discovery.urls.length,
+      isValid: discovery.isValid,
+      errors: discovery.errors,
+      robotsSitemapsUsed: discovery.robotsSitemapsUsed,
+    };
+
+    log.info(
+      {
+        sitemapUrls: discovery.urls.length,
+        sitemapSeedsEnqueued,
+        queueSize: enqueuedUrls.size,
+      },
+      "Sitemap discovery complete",
+    );
   }
 
-  // Cheerio-based crawling
+  // Cheerio-based crawling — seed queue (homepage first, then sitemap URLs)
   const requestQueue = await RequestQueue.open(`crawl-${Date.now()}` as any);
-  await requestQueue.addRequest({ url: normalizedBase, userData: { depth: 0 } });
+  await requestQueue.addRequest({
+    url: normalizedBase,
+    userData: { depth: 0, startTime: Date.now() },
+  });
+  for (const seedUrl of enqueuedUrls) {
+    if (seedUrl === normalizedBase) continue;
+    await requestQueue.addRequest({
+      url: seedUrl,
+      userData: { depth: 0, startTime: Date.now() },
+    });
+  }
 
   const handlePage = async (ctx: any) => {
     const { request, body } = ctx;
@@ -248,11 +302,15 @@ export async function executeCrawl(
     uniqueStatusCodes: statusCodes,
     depthDistribution,
     playwriteFallbackCount: usedPlaywrightFallback ? playwriteFallbackCount : 0,
+    sitemapUrlsDiscovered: sitemapSnapshot?.urlCount,
+    sitemapSeedsEnqueued,
+    finalEnqueuedUrlCount: enqueuedUrls.size,
   };
 
   return {
     summary,
     usedPlaywrightFallback,
     ndjsonPath,
+    sitemap: sitemapSnapshot,
   };
 }

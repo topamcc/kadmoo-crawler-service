@@ -51,6 +51,8 @@ export const config = {
     defaultTimeoutMs: envInt("DEFAULT_TIMEOUT_MS", 20000),
     defaultMaxDurationMinutes: envInt("DEFAULT_MAX_DURATION_MINUTES", 60),
     playwrightMaxConcurrency: envInt("PLAYWRIGHT_MAX_CONCURRENCY", 4),
+    /** Cap URLs loaded from sitemap.xml (and child sitemaps) into memory for seeding + analysis */
+    sitemapMaxUrls: envInt("SITEMAP_MAX_URLS", 50000),
   },
 
   queue: {

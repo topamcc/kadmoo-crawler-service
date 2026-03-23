@@ -17,7 +17,11 @@ import type {
   CrawledPageData,
   CrawlResultSummary,
   CrawlJobResultsResponse,
+  CrawlSitemapSnapshot,
 } from "../shared/types.js";
+
+const MAX_IMAGE_INVENTORY = 25_000;
+const MAX_PDF_LINKS = 20_000;
 
 function escapeHtml(s: string): string {
   return s
@@ -147,6 +151,7 @@ function buildCrawlMeta(
   summary: CrawlResultSummary,
   pages: CrawledPageData[],
   pagesQueued?: number,
+  sitemap?: CrawlSitemapSnapshot,
 ): CrawlMeta {
   const subPageStatusCodes: Record<number, number> = {};
   for (const p of pages.slice(1)) {
@@ -154,21 +159,41 @@ function buildCrawlMeta(
   }
 
   const crawled = summary.totalPages;
+  const sitemapUrlsDiscovered =
+    sitemap?.urlCount ?? summary.sitemapUrlsDiscovered ?? 0;
+  const robotsSitemapsUsed = sitemap?.robotsSitemapsUsed ?? [];
+  const frontier =
+    pagesQueued ??
+    summary.finalEnqueuedUrlCount ??
+    0;
   const totalCandidateUrls =
-    pagesQueued != null && pagesQueued > 0 ? Math.max(pagesQueued, crawled) : crawled;
+    frontier > 0
+      ? Math.max(frontier, crawled)
+      : Math.max(crawled, sitemapUrlsDiscovered);
 
   return {
-    sitemapUrlsDiscovered: 0,
+    sitemapUrlsDiscovered,
     linkDiscoveryUrlsFound: summary.totalInternalLinks,
-    robotsSitemapsUsed: [],
+    robotsSitemapsUsed,
     totalCandidateUrls,
     pagesCrawled: crawled,
     subPageStatusCodes,
   };
 }
 
+function sitemapSnapshotToData(snap: CrawlSitemapSnapshot): SitemapData {
+  return {
+    exists: snap.exists,
+    url: snap.url,
+    urls: snap.urls,
+    urlCount: snap.urlCount,
+    isValid: snap.isValid,
+    errors: snap.errors.length ? snap.errors : [],
+  };
+}
+
 const IMAGE_EXTENSIONS = /\.(jpe?g|png|gif|webp|svg|avif|bmp)(\?|$)/i;
-const PDF_PATTERN = /\.pdf(\?|$)/i;
+const PDF_PATTERN = /\.pdf(\?|#|$)/i;
 
 function getOrigin(url: string): string {
   try {
@@ -197,7 +222,8 @@ function extractPdfLinksFromPages(
   const linkMap = new Map<string, Set<string>>();
   for (const page of pages) {
     const pageUrl = page.finalUrl || page.url;
-    for (const link of page.internalLinks) {
+    const allLinks = [...page.internalLinks, ...page.externalLinks];
+    for (const link of allLinks) {
       const href = link.url?.trim();
       if (!href || !PDF_PATTERN.test(href)) continue;
       try {
@@ -244,7 +270,8 @@ function extractImagesFromPages(
       }
     }
 
-    for (const link of page.internalLinks) {
+    const linkList = [...page.internalLinks, ...page.externalLinks];
+    for (const link of linkList) {
       const href = link.url?.trim();
       if (!href || !IMAGE_EXTENSIONS.test(href)) continue;
       try {
@@ -291,7 +318,7 @@ export function convertExternalResultsToCrawlResult(
   targetUrl: string,
   pagesQueued?: number,
 ): CrawlResult {
-  const { pages, summary } = results;
+  const { pages, summary, sitemap: sitemapSnap } = results;
 
   if (pages.length === 0) {
     const emptyPage: CrawledPage = {
@@ -307,10 +334,10 @@ export function convertExternalResultsToCrawlResult(
     return {
       homepage: emptyPage,
       subPages: [],
-      sitemap: STUB_SITEMAP,
+      sitemap: sitemapSnap ? sitemapSnapshotToData(sitemapSnap) : STUB_SITEMAP,
       robots: STUB_ROBOTS,
       brokenLinks: [],
-      crawlMeta: buildCrawlMeta(summary, [], pagesQueued),
+      crawlMeta: buildCrawlMeta(summary, [], pagesQueued, sitemapSnap),
       imagesInventory: [],
       pdfLinks: [],
     };
@@ -334,14 +361,18 @@ export function convertExternalResultsToCrawlResult(
   const pdfLinks = extractPdfLinksFromPages(pages, targetUrl);
   const imagesInventory = extractImagesFromPages(pages, targetUrl);
 
+  const sitemapData = sitemapSnap
+    ? sitemapSnapshotToData(sitemapSnap)
+    : STUB_SITEMAP;
+
   return {
     homepage: toCrawledPage(homepageData),
     subPages: subPagesData.map(toCrawledPage),
-    sitemap: STUB_SITEMAP,
+    sitemap: sitemapData,
     robots: STUB_ROBOTS,
     brokenLinks: extractBrokenLinks(pages, targetUrl).slice(0, 1000),
-    crawlMeta: buildCrawlMeta(summary, pages, pagesQueued),
-    imagesInventory: imagesInventory.slice(0, 5000),
-    pdfLinks: pdfLinks.slice(0, 1000),
+    crawlMeta: buildCrawlMeta(summary, pages, pagesQueued, sitemapSnap),
+    imagesInventory: imagesInventory.slice(0, MAX_IMAGE_INVENTORY),
+    pdfLinks: pdfLinks.slice(0, MAX_PDF_LINKS),
   };
 }

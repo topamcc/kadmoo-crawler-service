@@ -182,16 +182,23 @@ export async function runAnalysis(
     if (archData?.crawlDepth && archData.crawlDepth.length > 500) {
       archData.crawlDepth = archData.crawlDepth.slice(0, 500);
     }
+    const MAX_DOMAIN_ASSET_IMAGES = 15_000;
+    const MAX_DOMAIN_ASSET_PDFS = 15_000;
     const da = trimmedReport.sections?.domainAssets?.data;
-    if (da?.images && da.images.length > 1000) da.images = da.images.slice(0, 1000);
-    if (da?.pdfs && da.pdfs.length > 500) da.pdfs = da.pdfs.slice(0, 500);
+    if (da?.images && da.images.length > MAX_DOMAIN_ASSET_IMAGES) {
+      da.images = da.images.slice(0, MAX_DOMAIN_ASSET_IMAGES);
+    }
+    if (da?.pdfs && da.pdfs.length > MAX_DOMAIN_ASSET_PDFS) {
+      da.pdfs = da.pdfs.slice(0, MAX_DOMAIN_ASSET_PDFS);
+    }
 
     // Aggressively strip section data to keep JSON under V8 string limit
-    for (const [key, section] of Object.entries(trimmedReport.sections) as [string, { data?: Record<string, unknown>; findings?: unknown[] }][]) {
+    for (const [, section] of Object.entries(trimmedReport.sections) as [string, { data?: Record<string, unknown>; findings?: unknown[] }][]) {
       if (!section) continue;
       // Strip any huge data arrays we haven't already handled
       if (section.data && typeof section.data === "object") {
         for (const [dk, dv] of Object.entries(section.data)) {
+          if (dk === "images" || dk === "pdfs") continue;
           if (Array.isArray(dv) && dv.length > 500) {
             (section.data as Record<string, unknown>)[dk] = dv.slice(0, 500);
           }
@@ -213,7 +220,14 @@ export async function runAnalysis(
         if (section.findings) section.findings = section.findings.slice(0, 20);
         if (section.data && typeof section.data === "object") {
           for (const [dk, dv] of Object.entries(section.data)) {
-            if (Array.isArray(dv) && dv.length > 50) {
+            if (!Array.isArray(dv)) continue;
+            if (dk === "images" || dk === "pdfs") {
+              if (dv.length > 8000) {
+                (section.data as Record<string, unknown>)[dk] = dv.slice(0, 8000);
+              }
+              continue;
+            }
+            if (dv.length > 50) {
               (section.data as Record<string, unknown>)[dk] = dv.slice(0, 50);
             }
           }

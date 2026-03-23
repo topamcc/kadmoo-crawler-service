@@ -77,6 +77,17 @@ export interface CrawlJobStatusResponse {
   reusedPages?: number;
 }
 
+/** Sitemap snapshot from crawl seed phase (for analysis + crawl meta) */
+export interface CrawlSitemapSnapshot {
+  exists: boolean;
+  url: string;
+  urls: string[];
+  urlCount: number;
+  isValid: boolean;
+  errors: string[];
+  robotsSitemapsUsed: string[];
+}
+
 export interface CrawlJobResultsResponse {
   jobId: string;
   status: CrawlJobStatus;
@@ -85,6 +96,8 @@ export interface CrawlJobResultsResponse {
   artifactUrl?: string;
   resumed?: boolean;
   reusedPages?: number;
+  /** Populated when external crawler ran sitemap discovery */
+  sitemap?: CrawlSitemapSnapshot;
 }
 
 // ---------------------------------------------------------------------------
@@ -132,6 +145,12 @@ export interface CrawlResultSummary {
   uniqueStatusCodes: Record<number, number>;
   depthDistribution: Record<number, number>;
   playwriteFallbackCount: number;
+  /** URLs read from sitemap(s) after crawl filters */
+  sitemapUrlsDiscovered?: number;
+  /** Sitemap URLs actually added to the crawl queue (deduped, within maxPages) */
+  sitemapSeedsEnqueued?: number;
+  /** Size of URL frontier after crawl completes (for coverage meta) */
+  finalEnqueuedUrlCount?: number;
 }
 
 // ---------------------------------------------------------------------------
