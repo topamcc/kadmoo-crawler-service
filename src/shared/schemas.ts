@@ -23,3 +23,16 @@ export const createCrawlJobSchema = z.object({
 });
 
 export type CreateCrawlJobInput = z.infer<typeof createCrawlJobSchema>;
+
+export const homepageSnapshotSchema = z.object({
+  url: z
+    .string()
+    .min(1, "URL is required")
+    .refine(
+      (v) => /^https?:\/\/.+/.test(v) || /^[a-zA-Z0-9]/.test(v),
+      "Must be a valid URL or domain",
+    ),
+  forcePlaywright: z.boolean().optional(),
+});
+
+export type HomepageSnapshotInput = z.infer<typeof homepageSnapshotSchema>;
